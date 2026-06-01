@@ -1,0 +1,10 @@
+# Nagrania termowizyjne (duże pliki binarne)
+*.seq
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Środowisko wirtualne
+inzynier/
