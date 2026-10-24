@@ -7,12 +7,15 @@ Inzynierka/
 ├── projekt/                      kod (w gicie)
 │   ├── aplikacja.py              GUI: rejestracja RGB ↔ termal
 │   ├── dopasowanie3.py           metoda rejestracji (ECC na maskach znacznika)
-│   ├── read_flirpy.py            nagranie .seq (FLIR) → klatki PNG
+│   ├── read_flirpy.py            nagrania .seq (FLIR) → obrazy (plik albo cały folder)
+│   ├── heic_do_jpg.py            zdjęcia HEIC → JPG numerowane wg czasu wykonania
 │   ├── modele_segmentacja/       segmentacja znamienia: PanDerm, tester, znacznik Π (własny README)
 │   └── README.md                 ten plik
 ├── dane/                         nowe dane (poza gitem)
-│   ├── dane_RGB/                 zdjęcia z telefonu:  znamie_01/, znamie_02/, …
-│   └── dane_termowizja/          nagrania i klatki:   znamie_01/, znamie_02/, …
+│   ├── dane_RGB/                 zdjęcia z telefonu: 1.jpg, 2.jpg, …
+│   ├── dane_termowizja/          obrazy termowizyjne: 1.jpg, 2.jpg, …
+│   ├── pary/                     pary RGB–termal do dopasowania
+│   └── mapowanie_*.csv           numer → oryginalny plik (IMG_xxxx.heic, thermalNNNN.SEQ)
 ├── wyniki/                       (poza gitem)
 │   ├── wyniki_dopasowania/       aplikacja.py, dopasowanie3.py
 │   ├── wyniki_segmentacji/       tester, trening PanDerm, sprawdz_znaczniki.bat
@@ -25,7 +28,8 @@ Inzynierka/
 │   │   ├── pary_rgb_termal/      nowe1 … nowe16: pary RGB–termal z wynikami starszych wersji
 │   │   ├── nagrania_termowizja/  19 nagrań .seq (luty, maj 2026)
 │   │   ├── znamiona/             10 zdjęć z 17.10 (5 ze znacznikiem Π)
-│   │   └── termografia_test/     pierwsze testy (marzec 2026)
+│   │   ├── termografia_test/     pierwsze testy (marzec 2026)
+│   │   └── oryginaly_heic/       oryginały zdjęć z dane_RGB (HEIC)
 │   ├── proba1 … proba10/         eksperymenty marzec–czerwiec (SimpleITK, krawędzie, ORB)
 │   ├── output_frames*/           klatki z pierwszych nagrań
 │   └── dopasowanie2.py, downloaddata.py
@@ -42,24 +46,27 @@ Ciężkie pliki modeli (środowisko z PyTorch, wagi, ISIC 2018) leżą poza OneD
 | Rejestracja RGB ↔ termal | `inzynierka\Scripts\python.exe projekt\aplikacja.py` | `wyniki/wyniki_dopasowania/` (domyślnie) |
 | Segmentacja znamienia | `projekt\modele_segmentacja\uruchom_tester.bat` | `wyniki/wyniki_segmentacji/` |
 | Kontrola znacznika na nowych zdjęciach | przeciągnij `dane\dane_RGB` na `projekt\modele_segmentacja\sprawdz_znaczniki.bat` | `wyniki/wyniki_segmentacji/znaczniki/` |
-| Klatki z nagrania .seq | ustaw `filepath` w `projekt/read_flirpy.py` i uruchom | obok nagrania z `dane/` (albo `dane/dane_termowizja/<nagranie>/`) |
+| Nagrania .seq → JPG | `python projekt\read_flirpy.py <folder z .seq> --numeruj` | `dane/dane_termowizja/N.jpg` + `dane/mapowanie_dane_termowizja.csv` |
+| Zdjęcia HEIC → JPG | `python projekt\heic_do_jpg.py` (wymaga `pip install pillow-heif`) | `dane/dane_RGB/N.jpg` + `dane/mapowanie_dane_RGB.csv`; HEIC do `archiwum/dane/oryginaly_heic/` |
+| Klatki jednego nagrania | ustaw `FILEPATH` w `projekt/read_flirpy.py` i uruchom bez argumentów | `frame_NNN.png` obok nagrania z `dane/` (albo `dane/dane_termowizja/<nagranie>/`) |
 | Trening PanDerm | `projekt\modele_segmentacja\trenuj_panderm.bat` | wagi w `modele_dane\wagi\`, wykres w `wyniki/wyniki_segmentacji/` |
 
 W aplikacji okna wyboru plików otwierają się w `dane/dane_RGB` i `dane/dane_termowizja`.
 `dopasowanie3.py` zapisuje pliki diagnostyczne (`<wynik>_maska_*.png`, `<wynik>_debug_*.png`)
 obok pliku wyniku — dane wejściowe nie są modyfikowane.
 
-## Konwencja nowych danych
+## Nowe dane
 
-Jedno znamię = jeden podfolder, o tej samej nazwie w `dane_RGB` i `dane_termowizja`:
+Numeracja 1…N: zdjęcia wg czasu wykonania (EXIF), obrazy termowizyjne wg numeru nagrania.
+Oba skrypty numerują od pierwszego wolnego numeru, więc kolejne serie dopisują się na końcu,
+a pliki `dane/mapowanie_*.csv` trzymają powiązanie z oryginałami.
 
-```
-dane/dane_RGB/znamie_01/IMG_1234.jpg, IMG_1235.jpg, …
-dane/dane_termowizja/znamie_01/Rec-000050.seq  →  read_flirpy.py  →  znamie_01/Rec-000050/frame_000.png, …
-```
+Seria z 23.10.2026: 96 zdjęć RGB (`IMG_9844`–`IMG_9939`, 12:07–12:58) i 97 nagrań
+(`thermal0001`–`thermal0101`, 12:58–13:49). Numery RGB i termowizji nie odpowiadają sobie 1:1
+(jedno nagranie więcej) — pary trzeba ustalić przed dopasowaniem (`dane/pary/`).
 
-Dzięki temu wiadomo, które zdjęcie pasuje do którego nagrania, a podział train/test w segmentacji
-idzie po znamionach (`sprawdz_znaczniki.bat` liczy zdjęcia na znamię).
+Kamera termowizyjna z tej serii ma klatkę 320×240 (+6 wierszy telemetrii, które `read_flirpy.py`
+obcina); przesunięcie kolumn 66 px dotyczy tylko FLIR A655sc (640×480) ze starszych nagrań.
 
 ## Git
 
