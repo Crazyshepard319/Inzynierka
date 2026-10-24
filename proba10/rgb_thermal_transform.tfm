@@ -1,7 +1,0 @@
-#Insight Transform File V1.0
-#Transform 0
-Transform: CompositeTransform_double_2_2
-#Transform 1
-Transform: Similarity2DTransform_double_2_2
-Parameters: 0.9790899662713193 -0.006587209608384075 -439.808469942735 -716.4943094887344
-FixedParameters: 767.5 1023.5

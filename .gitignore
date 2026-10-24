@@ -1,10 +1,20 @@
-# Nagrania termowizyjne (duże pliki binarne)
-*.seq
+# Dane, wyniki i archiwum (duze pliki binarne) - poza gitem
+dane/
+wyniki/
+archiwum/
+*.[sS][eE][qQ]
+
+# Literatura (PDF-y)
+praca/literatura/
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
 
-# Środowisko wirtualne
+# Srodowiska wirtualne
+inzynierka/
 inzynier/
+
+# Modele segmentacji: sklonowane repozytoria autorow
+projekt/modele_segmentacja/repozytoria/
