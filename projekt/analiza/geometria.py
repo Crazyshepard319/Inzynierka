@@ -4,7 +4,7 @@ Geometria: przenoszenie punktow i obszarow miedzy obrazami oraz przeliczenie pik
 Macierz T (3x3, z rejestracji, plik <wynik>_macierz.txt): piksel RGB (x, y, 1) -> piksel termalny.
 Obszary przenosimy jako kontury (wektorowo), a nie jako obraz maski: wierzcholki konturu przechodza
 przez T, a w obrazie docelowym wypelniany jest dokladnie (srodek piksela w wielokacie). Dzieki temu
-mala maska (znamie ~7 px na termowizji) nie traci ksztaltu na interpolacji. Pole liczone z ulamka
+mala maska (znamie: kilkadziesiat-kilkaset pikseli termowizji) nie traci ksztaltu na interpolacji. Pole liczone z ulamka
 pokrycia pikseli (siatka gestsza `skala` razy) ma blad ~1% (test: losowe kwadraty).
 """
 import cv2
@@ -78,3 +78,4 @@ def mm_na_px(H, punkt):
     J = np.array([[(H[0, 0] - u * H[2, 0]) / w, (H[0, 1] - u * H[2, 1]) / w],
                   [(H[1, 0] - v * H[2, 0]) / w, (H[1, 1] - v * H[2, 1]) / w]])
     return float(np.sqrt(abs(np.linalg.det(J))))
+

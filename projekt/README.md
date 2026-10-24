@@ -5,14 +5,14 @@
 ```
 Inzynierka/
 ├── projekt/                      kod (w gicie)
-│   ├── aplikacja.py              GUI: rejestracja RGB ↔ termal
+│   ├── aplikacja.py              GUI: cały system krok po kroku (dane → rejestracja → segmentacja → przeniesienie ROI → pomiary → raport)
 │   ├── dopasowanie3.py           metoda rejestracji (ECC na maskach znacznika)
 │   ├── read_flirpy.py            nagrania .seq (FLIR) → obrazy (plik albo cały folder)
 │   ├── heic_do_jpg.py            zdjęcia HEIC → JPG numerowane wg czasu wykonania
 │   ├── import_cvat.py            adnotacje z CVAT → maski i narożniki znacznika w dane/pary/N/
 │   ├── temperatury_par.py        nagrania SEQ → mapy temperatur °C (dane/pary/N/termal_C.npy)
 │   ├── potok_pary.py             analiza pary: rejestracja → przeniesienie ROI → pomiary → zgodność → raport
-│   ├── analiza/                  moduły potoku: dane, geometria, miary, pomiary, raport
+│   ├── analiza/                  etapy systemu (system.py, wspólne dla aplikacji i potoku) + dane, geometria, miary, pomiary, obrazy, raport
 │   ├── modele_segmentacja/       segmentacja znamienia: PanDerm, tester, znacznik Π (własny README)
 │   └── README.md                 ten plik
 ├── dane/                         nowe dane (poza gitem)
@@ -26,7 +26,7 @@ Inzynierka/
 ├── wyniki/                       (poza gitem)
 │   ├── wyniki_dopasowania/       aplikacja.py, dopasowanie3.py
 │   ├── wyniki_segmentacji/       tester, trening PanDerm, sprawdz_znaczniki.bat
-│   └── wyniki_obu/               maska znamienia przeniesiona na termal (do zrobienia)
+│   └── wyniki_obu/               raporty par: raport.html, metryki.json, obrazy PNG (aplikacja, potok_pary.py)
 ├── praca/
 │   ├── literatura/               PDF-y (poza gitem)
 │   └── rysunki/                  rysunki do tekstu
@@ -50,18 +50,28 @@ Ciężkie pliki modeli (środowisko z PyTorch, wagi, ISIC 2018) leżą poza OneD
 
 | Co | Jak | Wynik |
 |---|---|---|
-| Rejestracja RGB ↔ termal | `inzynierka\Scripts\python.exe projekt\aplikacja.py` | `wyniki/wyniki_dopasowania/` (domyślnie) |
+| Aplikacja (wszystkie etapy) | `inzynierka\Scripts\python.exe projekt\aplikacja.py` | rejestracja w `wyniki/wyniki_dopasowania/<para>/`, raport w `wyniki/wyniki_obu/<para>/` |
 | Segmentacja znamienia | `projekt\modele_segmentacja\uruchom_tester.bat` | `wyniki/wyniki_segmentacji/` |
 | Kontrola znacznika na nowych zdjęciach | przeciągnij `dane\dane_RGB` na `projekt\modele_segmentacja\sprawdz_znaczniki.bat` | `wyniki/wyniki_segmentacji/znaczniki/` |
 | Nagrania .seq → JPG | `python projekt\read_flirpy.py <folder z .seq> --numeruj` | `dane/dane_termowizja/N.jpg` + `dane/mapowanie_dane_termowizja.csv` |
 | Zdjęcia HEIC → JPG | `python projekt\heic_do_jpg.py` (wymaga `pip install pillow-heif`) | `dane/dane_RGB/N.jpg` + `dane/mapowanie_dane_RGB.csv`; HEIC do `archiwum/dane/oryginaly_heic/` |
 | Import adnotacji z CVAT | eksporty „CVAT for images 1.1” do `dane\adnotacje\`, potem `python projekt\import_cvat.py` | maski i `narozniki.json` w `dane/pary/N/`, `dane/adnotacje/podsumowanie.csv`, podglądy w `wyniki/kontrola_adnotacji/` |
 | Mapy temperatur °C | `python projekt\temperatury_par.py` (emisyjność skóry 0,98) | `dane/pary/N/termal_C.npy`, `dane/temperatury.csv` |
-| Analiza jednej pary | `python projekt\potok_pary.py 1` | `wyniki/wyniki_obu/para_1/raport.html` + `metryki.json`, rejestracja w `wyniki/wyniki_dopasowania/para_1/` |
+| Analiza jednej pary | `python projekt\potok_pary.py 1` (`--narozniki auto`: skala bez adnotacji) | `wyniki/wyniki_obu/para_1/raport.html` + `metryki.json`, rejestracja w `wyniki/wyniki_dopasowania/para_1/` |
 | Klatki jednego nagrania | ustaw `FILEPATH` w `projekt/read_flirpy.py` i uruchom bez argumentów | `frame_NNN.png` obok nagrania z `dane/` (albo `dane/dane_termowizja/<nagranie>/`) |
 | Trening PanDerm | `projekt\modele_segmentacja\trenuj_panderm.bat` | wagi w `modele_dane\wagi\`, wykres w `wyniki/wyniki_segmentacji/` |
 
-W aplikacji okna wyboru plików otwierają się w `dane/dane_RGB` i `dane/dane_termowizja`.
+Aplikacja ma sześć zakładek – etapy z projektu systemu (kod etapów: `analiza/system.py`):
+1. **Dane** – para z `dane/pary/N` (z adnotacjami z CVAT) albo dowolne dwa pliki,
+2. **Rejestracja** – `dopasowanie3.py`, macierz T, nałożenie z suwakiem przezroczystości,
+3. **Segmentacja** – narożniki znacznika (CVAT albo automatycznie: wzorzec Π dopasowany do maski znacznika)
+   → skala w mm; znamię: CVAT, PanDerm (osobne środowisko modeli), obrys ręczny albo maska z pliku,
+4. **Przeniesienie ROI** – znamię i znacznik zdjęcie → termowizja (T); obszar zaznaczony na termowizji → zdjęcie (T⁻¹),
+5. **Pomiary** – wymiary i kolor znamienia, kontrola skali, zgodność z CVAT; kliknięcie nazwy pokazuje objaśnienie,
+6. **Raport** – `raport.html` (z objaśnieniem wszystkich wielkości), `metryki.json`, obrazy PNG.
+
+Podglądy: kółko myszy = powiększenie, przeciąganie = przesuwanie, dwuklik = widok początkowy; przy zaznaczaniu
+lewy klik dodaje punkt, prawy klik zamyka obrys. Okna wyboru plików otwierają się w `dane/dane_RGB` i `dane/dane_termowizja`.
 `dopasowanie3.py` zapisuje pliki diagnostyczne (`<wynik>_maska_*.png`, `<wynik>_debug_*.png`)
 obok pliku wyniku — dane wejściowe nie są modyfikowane.
 
