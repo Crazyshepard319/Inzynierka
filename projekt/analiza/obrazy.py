@@ -5,7 +5,7 @@ Obrazy do raportu pary (BGR, uint8):
     nakladka            termowizja nalozona na zdjecie (50 %) z obrysami znacznika i znamienia
     nakladka_zblizenie  to samo w powiekszeniu wokol znamienia; termowizja bez wygladzania, wiec widac
                         jej piksele, i podzialka w mm
-Obszary zaznaczone na termowizji i przeniesione na zdjecie (T^-1) sa rysowane na niebiesko.
+Znamie z segmentacji (PanDerm) - czerwone; gdy para ma adnotacje z CVAT, znamie z CVAT - niebieskie (cienkie).
 """
 import cv2
 import numpy as np
@@ -83,7 +83,7 @@ def rysuj(a):
     pr = a.przeniesione
     kontury_rgb = geo.kontury(a.maska_znamie)
     pierscien_rgb = a.wyniki["pomiary_rgb"].get("_pierscien")
-    obszary = a.obszary_z_termowizji
+    kontury_cvat = geo.kontury(a.wzorzec["maska_znamie_rgb"]) if a.wzorzec is not None else []
 
     # 1. zdjecie: kadr wokol znacznika
     x0, y0, x1, y1 = ramka(a.narozniki_rgb, a.rgb.shape)
@@ -93,8 +93,8 @@ def rysuj(a):
     _linie(k, [a.narozniki_rgb], tr, ZIELONY, 2)
     if pierscien_rgb is not None:
         _linie(k, brzegi(pierscien_rgb), tr, ZOLTY, 1)
+    _linie(k, kontury_cvat, tr, NIEBIESKI, 1)
     _linie(k, kontury_rgb, tr, CZERWONY, 2)
-    _linie(k, [o["rgb_px"] for o in obszary], tr, NIEBIESKI, 2)
     for i, q in enumerate(tr(a.narozniki_rgb)):
         cv2.circle(k, (int(q[0]), int(q[1])), 5, ZIELONY, -1, cv2.LINE_AA)
         napis(k, str(i), (q[0] + 7, q[1] - 7))
@@ -109,9 +109,9 @@ def rysuj(a):
         _linie(t, [nar_ref], d, FIOLET, 2)
     _linie(t, [pr["narozniki"]], d, ZIELONY, 2)
     _linie(t, [(kk + 0.5) / 4 - 0.5 for kk in geo.kontury(pr["znamie_gesta"].astype(np.uint8))], d, CZERWONY, 2)
-    _linie(t, [o["termal_px"] for o in obszary], d, NIEBIESKI, 2)
-    if a.wzorzec is not None:
-        for p, q in zip(d(pr["narozniki"]), d(a.wzorzec["narozniki_termal"])):
+    if a.wzorzec is not None:              # blad rejestracji: narozniki z CVAT (zdjecie -> T) vs z CVAT na termowizji
+        nar_cvat_T = geo.przenies_punkty(a.wzorzec["narozniki_rgb"], a.M)
+        for p, q in zip(d(nar_cvat_T), d(a.wzorzec["narozniki_termal"])):
             cv2.line(t, (int(round(p[0])), int(round(p[1]))), (int(round(q[0])), int(round(q[1]))), BIALY, 2, cv2.LINE_AA)
     ob["termal"] = t
 
@@ -122,7 +122,6 @@ def rysuj(a):
     if zt is not None:
         _linie(nal, [zt], tr, FIOLET, 2)
     _linie(nal, kontury_rgb, tr, CZERWONY, 3)
-    _linie(nal, [o["rgb_px"] for o in obszary], tr, NIEBIESKI, 2)
     ob["nakladka"] = nal
 
     # 4. zblizenie wokol znamienia: termowizja bez wygladzania (widac jej piksele), podzialka
@@ -131,8 +130,8 @@ def rysuj(a):
     srodek = np.argwhere(a.maska_znamie > 0).mean(0)[::-1]
     rk = ramka(srodek, a.rgb.shape, 0, bok_mm / s)
     nal, tr = nalozenie_kadru(a, rk, 600, interpolacja=cv2.INTER_NEAREST)
+    _linie(nal, kontury_cvat, tr, NIEBIESKI, 1)
     _linie(nal, kontury_rgb, tr, CZERWONY, 2)
-    _linie(nal, [o["rgb_px"] for o in obszary], tr, NIEBIESKI, 2)
     _podzialka(nal, s * (rk[2] - rk[0]) / 600)
     ob["nakladka_zblizenie"] = nal
     return ob

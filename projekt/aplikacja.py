@@ -1,24 +1,23 @@
 """
 Aplikacja desktopowa: system dopasowania i wielomodalnej analizy regionow (zdjecie RGB <-> termowizja).
 
-Zakladki odpowiadaja etapom z projektu systemu (kod etapow: analiza/system.py, wspolny z potok_pary.py):
-  1. Dane           para z bazy (dane/pary/N, z adnotacjami z CVAT) albo dowolne dwa pliki
-  2. Rejestracja    dopasowanie3 -> macierz T; podglad nalozenia z suwakiem przezroczystosci
-  3. Segmentacja    narozniki znacznika (skala w mm) i znamie: CVAT / PanDerm / obrys reczny / plik maski
-  4. Przeniesienie  znamie i znacznik: zdjecie -> termowizja; obszar zaznaczony na termowizji -> zdjecie
-  5. Pomiary        wymiary i kolor znamienia, kontrola skali, zgodnosc z CVAT, objasnienia wielkosci
+Zakladki odpowiadaja etapom z projektu systemu (kod etapow: analiza/system.py, wspolny z potok_pary.py).
+Wszystko jest wyznaczane automatycznie; adnotacje z CVAT (gdy para je ma) sluza tylko do oceny.
+  1. Dane           para z bazy (dane/pary/N) albo dowolne dwa pliki
+  2. Rejestracja    dopasowanie3 -> macierz T (model z dopasowanie3.MODEL); nalozenie z suwakiem
+  3. Segmentacja    narozniki znacznika (wzorzec Π dopasowany do maski znacznika) -> skala w mm;
+                    znamie modelem PanDerm we wnetrzu znacznika
+  4. Przeniesienie  znamie i znacznik: zdjecie -> termowizja (T)
+  5. Pomiary        wymiary i kolor znamienia, kontrola skali, ocena wzgledem CVAT, objasnienia wielkosci
   6. Raport         raport.html + metryki.json + obrazy PNG w wyniki/wyniki_obu/...
 
-Podglady: kolko myszy = powiekszenie, przeciaganie lewym (albo srodkowym) przyciskiem = przesuwanie,
-dwuklik = widok poczatkowy. Zaznaczanie obszaru: lewy klik dodaje punkt, prawy klik albo Enter zamyka,
-Backspace cofa punkt, Esc anuluje.
+Podglady: kolko myszy = powiekszenie, przeciaganie myszka = przesuwanie, dwuklik = widok poczatkowy.
 
-Wymaga: customtkinter, Pillow, opencv-python, numpy, matplotlib (srodowisko "inzynierka").
-Segmentacja PanDerm uruchamia sie w osobnym srodowisku modeli (modele_segmentacja/konfiguracja.py).
+Wymaga: customtkinter, Pillow, opencv-python, numpy (srodowisko "inzynierka").
+PanDerm uruchamia sie w osobnym srodowisku modeli (modele_segmentacja/konfiguracja.py).
 """
 import os
 import queue
-import subprocess
 import sys
 import threading
 import tkinter as tk
@@ -38,7 +37,7 @@ import dopasowanie3 as dopasowanie                               # noqa: E402
 from analiza import geometria as geo, raport                     # noqa: E402
 from analiza.dane import INZ, dostepne_pary, imread              # noqa: E402
 from analiza.obrazy import ramka                                 # noqa: E402
-from analiza.system import MODELE_REJESTRACJI, Analiza, BladEtapu   # noqa: E402
+from analiza.system import OPIS_ZNAMIENIA, Analiza, BladEtapu, analizuj   # noqa: E402
 
 KATALOG_RGB = INZ / "dane" / "dane_RGB"
 KATALOG_TERMAL = INZ / "dane" / "dane_termowizja"
@@ -51,7 +50,7 @@ KOLOR_LOG_TLO = "#161616"
 KOLOR_LOG_TEKST = "#c8c8c8"
 OK, PRACA, BLAD, SZARY = "#2cc97a", "#e8a020", "#e84040", "gray"
 # kolory obrysow (jak w raporcie)
-ZIELONY, CZERWONY, FIOLET, NIEBIESKI, ZOLTY = "#00d000", "#ff3030", "#ff40ff", "#20a8ff", "#ffd000"
+ZIELONY, CZERWONY, FIOLET, NIEBIESKI = "#00d000", "#ff3030", "#ff40ff", "#20a8ff"
 
 ZAKLADKI = ("1. Dane", "2. Rejestracja", "3. Segmentacja", "4. Przeniesienie ROI", "5. Pomiary", "6. Raport")
 ETAPY = ("wejscie", "rejestracja", "segmentacja", "przeniesienie", "pomiary", "raport")
@@ -88,7 +87,8 @@ def _f(v, cyfry=2):
 # ── podglad obrazu z powiekszaniem, nakladkami i zaznaczaniem wielokata ─────────
 
 class Podglad(ctk.CTkFrame):
-    """Obraz BGR (opcjonalnie z warstwa BGRA nalozona z przezroczystoscia) na plotnie tk.
+    """Obraz BGR (opcjonalnie z warstwa BGRA nalozona z przezroczystoscia) na plotnie tk,
+    z powiekszaniem i przesuwaniem.
     Nakladki: lista slownikow {pkt: (N, 2) px obrazu, kolor, grubosc, zamkniety, punkty, etykiety}.
     Wspolrzedne punktow jak w OpenCV: srodek piksela (i, j) = (j, i)."""
 
@@ -98,8 +98,6 @@ class Podglad(ctk.CTkFrame):
         self.columnconfigure(0, weight=1)
         self._tytul = ctk.CTkLabel(self, text=tytul, anchor="w", font=ctk.CTkFont(size=12, weight="bold"))
         self._tytul.grid(row=0, column=0, sticky="ew", padx=10, pady=(6, 0))
-        self._podpowiedz = ctk.CTkLabel(self, text="", anchor="w", text_color=ZOLTY, font=ctk.CTkFont(size=11))
-        self._podpowiedz.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 4))
         self.c = tk.Canvas(self, bg="#1b1b1b", highlightthickness=0, width=200, height=150)
         self.c.grid(row=1, column=0, sticky="nsew", padx=6, pady=4)
         self.piksele = piksele                      # powiekszenie bez wygladzania (termowizja)
@@ -110,25 +108,16 @@ class Podglad(ctk.CTkFrame):
         self._widok = None
         self._pokazany = False
         self._foto = None
-        self._punkty = None
-        self._po_zamknieciu = self._po_anulowaniu = None
         self._ciagniecie = None
         c = self.c
         c.bind("<Configure>", self._zmiana_rozmiaru)
         c.bind("<MouseWheel>", lambda e: self._powieksz(e, 1 if e.delta > 0 else -1))
         c.bind("<Button-4>", lambda e: self._powieksz(e, 1))
         c.bind("<Button-5>", lambda e: self._powieksz(e, -1))
-        c.bind("<ButtonPress-1>", self._lewy)
+        c.bind("<ButtonPress-1>", self._start_ciagniecia)
         c.bind("<B1-Motion>", self._ciagnij)
         c.bind("<ButtonRelease-1>", lambda e: setattr(self, "_ciagniecie", None))
-        c.bind("<Double-Button-1>", lambda e: None if self.rysuje else self.pokaz())
-        c.bind("<ButtonPress-2>", self._start_ciagniecia)
-        c.bind("<B2-Motion>", self._ciagnij)
-        c.bind("<ButtonPress-3>", lambda e: self.zamknij() if self.rysuje else None)
-        c.bind("<Enter>", lambda e: c.focus_set())
-        c.bind("<Return>", lambda e: self.zamknij())
-        c.bind("<BackSpace>", lambda e: self.cofnij())
-        c.bind("<Escape>", lambda e: self.anuluj())
+        c.bind("<Double-Button-1>", lambda e: self.pokaz())
 
     # ── dane ────────────────────────────────────────────────────────────────
     def ustaw_tytul(self, tekst):
@@ -158,7 +147,6 @@ class Podglad(ctk.CTkFrame):
         self.odswiez()
 
     def wyczysc(self):
-        self.anuluj()
         self.obraz = self.warstwa = None
         self.nakladki, self._widok = [], None
         self.odswiez()
@@ -191,9 +179,6 @@ class Podglad(ctk.CTkFrame):
         p = np.asarray(pkt, np.float64).reshape(-1, 2)
         return (p + 0.5 - [self.ox, self.oy]) * self.s
 
-    def _na_obraz(self, x, y):
-        return x / self.s + self.ox - 0.5, y / self.s + self.oy - 0.5
-
     def _powieksz(self, e, kierunek):
         if self.obraz is None:
             return
@@ -205,65 +190,12 @@ class Podglad(ctk.CTkFrame):
     def _start_ciagniecia(self, e):
         self._ciagniecie = (e.x, e.y, self.ox, self.oy)
 
-    def _lewy(self, e):
-        if self.rysuje:
-            if self.obraz is not None:
-                x, y = self._na_obraz(e.x, e.y)
-                self._punkty.append((float(np.clip(x, 0, self.obraz.shape[1] - 1)),
-                                     float(np.clip(y, 0, self.obraz.shape[0] - 1))))
-                self.odswiez()
-        else:
-            self._start_ciagniecia(e)
-
     def _ciagnij(self, e):
         if self._ciagniecie is None:
             return
         x0, y0, ox, oy = self._ciagniecie
         self.ox, self.oy = ox - (e.x - x0) / self.s, oy - (e.y - y0) / self.s
         self.odswiez()
-
-    # ── zaznaczanie wielokata ───────────────────────────────────────────────
-    @property
-    def rysuje(self):
-        return self._punkty is not None
-
-    def zacznij_rysowanie(self, po_zamknieciu, po_anulowaniu=None, podpowiedz=""):
-        self._punkty = []
-        self._po_zamknieciu, self._po_anulowaniu = po_zamknieciu, po_anulowaniu
-        self._podpowiedz.configure(text=podpowiedz or "Lewy klik: punkt · prawy klik / Enter: zamknij · "
-                                                      "Backspace: cofnij · Esc: anuluj · kółko: powiększenie")
-        self.c.configure(cursor="crosshair")
-        self.c.focus_set()
-        self.odswiez()
-
-    def _koniec_rysowania(self):
-        self._punkty = None
-        self._podpowiedz.configure(text="")
-        self.c.configure(cursor="")
-
-    def zamknij(self):
-        if not self.rysuje:
-            return
-        if len(self._punkty) < 3:
-            self.bell()
-            return
-        pkt, cb = np.array(self._punkty), self._po_zamknieciu
-        self._koniec_rysowania()
-        self.odswiez()
-        cb(pkt)
-
-    def cofnij(self):
-        if self.rysuje and self._punkty:
-            self._punkty.pop()
-            self.odswiez()
-
-    def anuluj(self):
-        if self.rysuje:
-            cb = self._po_anulowaniu
-            self._koniec_rysowania()
-            self.odswiez()
-            if cb:
-                cb()
 
     # ── rysowanie ───────────────────────────────────────────────────────────
     def odswiez(self):
@@ -301,12 +233,7 @@ class Podglad(ctk.CTkFrame):
             if n.get("etykiety"):
                 for i, (x, y) in enumerate(q[:len(n["pkt"])]):
                     c.create_text(x + 9, y - 9, text=str(i), fill="white", font=("Segoe UI", 9, "bold"))
-        if self.rysuje and self._punkty:
-            q = self._na_plotno(self._punkty)
-            if len(q) > 1:
-                c.create_line(*q.ravel().tolist(), fill=ZOLTY, width=2)
-            for x, y in q:
-                c.create_oval(x - 3, y - 3, x + 3, y + 3, fill=ZOLTY, outline="")
+
 
 
 # ── aplikacja ──────────────────────────────────────────────────────────────
@@ -454,7 +381,7 @@ class Aplikacja(ctk.CTk):
         self._naglowek(p, "Informacje", 3)
         self._lbl_info = self._opis(p, "Nic nie wczytano.", 4, kolor=("gray20", "gray80"))
         self._naglowek(p, "Cały potok naraz", 5)
-        self._opis(p, "Dla par z adnotacjami: rejestracja, narożniki i znamię z CVAT, przeniesienie, pomiary i raport "
+        self._opis(p, "Rejestracja, narożniki znacznika, znamię (PanDerm), przeniesienie, pomiary i raport "
                       "– jak potok_pary.py.", 6)
         self._btn_wszystko = self._przycisk(p, "Wykonaj wszystkie etapy", self._wszystkie_etapy, 7)
         self._dalej(p, 8, 1)
@@ -518,13 +445,10 @@ class Aplikacja(ctk.CTk):
             pg.wyczysc()
         self._pg_seg.ustaw(a.rgb)
         self._pg_prz_ter.ustaw(a.termal)
-        self._var_nar.set("cvat" if a.wzorzec is not None else "auto")
-        self._var_zn.set("cvat" if a.wzorzec is not None else "obrys")
         self._lbl_rej.configure(text="")
         self._lbl_nar.configure(text="")
         self._lbl_zn.configure(text="")
         self._lbl_prz.configure(text="")
-        self._lbl_obszary.configure(text="")
         self._pokaz_pomiary()
         i = a.info
         linie = [f"Para {a.para}" if a.para is not None else "Własne pliki",
@@ -532,7 +456,7 @@ class Aplikacja(ctk.CTk):
                  f"Termowizja: {i.get('termal_nagranie', a.ter_path.name)}  ({a.termal.shape[1]}×{a.termal.shape[0]} px)"]
         if "znamie" in i:
             linie.append(f"Znamię nr {i['znamie']}, fold {i['fold']}")
-        linie.append("Adnotacje z CVAT: " + ("są (wzorzec do oceny)" if a.wzorzec is not None else "brak"))
+        linie.append("Adnotacje z CVAT: " + ("są (tylko do oceny wyników)" if a.wzorzec is not None else "brak"))
         if (a.folder_rejestracji / "dopasowanie_macierz.txt").exists():
             linie.append("Jest zapisana rejestracja (można ją wczytać w kroku 2).")
         self._lbl_info.configure(text="\n".join(linie))
@@ -548,10 +472,8 @@ class Aplikacja(ctk.CTk):
         self._naglowek(p, "Rejestracja (dopasowanie3.py)", 0)
         self._opis(p, "Znacznik Π jest wykrywany automatycznie na obu obrazach (bez adnotacji), a jego kształty są "
                       "dopasowywane – wynik to macierz T: piksel zdjęcia → piksel termowizji.", 1)
-        ctk.CTkLabel(p, text="Model przekształcenia", anchor="w").grid(row=2, column=0, sticky="ew", padx=10, pady=(8, 0))
-        self._cmb_model = ctk.CTkComboBox(p, values=list(MODELE_REJESTRACJI))
-        self._cmb_model.grid(row=3, column=0, sticky="ew", padx=10, pady=4)
-        self._cmb_model.set("auto")
+        self._opis(p, f"Model przekształcenia: {dopasowanie.MODEL} (ustawienie MODEL w dopasowanie3.py).", 2,
+                   kolor=("gray20", "gray80"))
         self._btn_rej = self._przycisk(p, "Uruchom rejestrację", self._rejestruj, 4, glowny=True)
         self._btn_rej_wczytaj = self._przycisk(p, "Wczytaj zapisaną rejestrację", self._wczytaj_rejestracje, 5)
         self._lbl_rej = self._opis(p, "", 6, kolor=("gray20", "gray80"))
@@ -570,9 +492,8 @@ class Aplikacja(ctk.CTk):
         self._pg_rej.grid(row=0, column=1, sticky="nsew", pady=4)
 
     def _rejestruj(self):
-        model = self._cmb_model.get()
         self._log_wyczysc()
-        self._w_tle("Rejestracja", lambda: self.a.rejestruj(model, log=QueueWriter(self._q)), self._po_rejestracji)
+        self._w_tle("Rejestracja", lambda: self.a.rejestruj(log=QueueWriter(self._q)), self._po_rejestracji)
 
     def _wczytaj_rejestracje(self):
         self._w_tle("Wczytanie rejestracji", self.a.wczytaj_rejestracje, self._po_rejestracji)
@@ -616,107 +537,28 @@ class Aplikacja(ctk.CTk):
     # ── 3. segmentacja ──────────────────────────────────────────────────────
     def _zakladka_segmentacja(self, t):
         p = self._panel(t)
-        self._naglowek(p, "Narożniki znacznika → skala w mm", 0)
-        self._var_nar = ctk.StringVar(value="cvat")
-        self._rb_nar_cvat = ctk.CTkRadioButton(p, text="Adnotacja z CVAT", variable=self._var_nar, value="cvat",
-                                               command=self._odswiez_stan)
-        self._rb_nar_cvat.grid(row=1, column=0, sticky="w", padx=14, pady=2)
-        ctk.CTkRadioButton(p, text="Automatycznie (wzorzec Π dopasowany\ndo maski znacznika z rejestracji)",
-                           variable=self._var_nar, value="auto", command=self._odswiez_stan).grid(
-            row=2, column=0, sticky="w", padx=14, pady=2)
-        self._btn_nar = self._przycisk(p, "Wyznacz narożniki", self._narozniki, 3, glowny=True)
+        self._naglowek(p, "Znacznik i znamię", 0)
+        self._opis(p, "Narożniki znacznika: wzorzec Π (35 × 26 mm, pasek 10 mm) dopasowany do maski znacznika "
+                      "z rejestracji → skala w mm. Znamię: model PanDerm we wnętrzu znacznika (osobne środowisko "
+                      "modeli z PyTorch; pierwsze uruchomienie wczytuje wagi).", 1)
+        self._btn_seg = self._przycisk(p, "Wyznacz narożniki i znamię", self._segmentuj, 2, glowny=True)
+        self._naglowek(p, "Narożniki", 3)
         self._lbl_nar = self._opis(p, "", 4, kolor=("gray20", "gray80"))
-
-        self._naglowek(p, "Znamię na zdjęciu", 5)
-        self._var_zn = ctk.StringVar(value="cvat")
-        self._rb_zn_cvat = ctk.CTkRadioButton(p, text="Adnotacja z CVAT", variable=self._var_zn, value="cvat")
-        self._rb_zn_cvat.grid(row=6, column=0, sticky="w", padx=14, pady=2)
-        for i, (tekst, wartosc) in enumerate((("PanDerm (model M1)", "panderm"), ("Obrys ręczny", "obrys"),
-                                              ("Maska z pliku PNG", "plik"))):
-            ctk.CTkRadioButton(p, text=tekst, variable=self._var_zn, value=wartosc).grid(row=7 + i, column=0, sticky="w", padx=14, pady=2)
-        self._btn_zn = self._przycisk(p, "Wyznacz znamię", self._znamie, 10, glowny=True)
-        self._ramka_obrys = ctk.CTkFrame(p, fg_color="transparent")
-        self._ramka_obrys.columnconfigure((0, 1, 2), weight=1)
-        for i, (tekst, cmd) in enumerate((("Zamknij", lambda: self._pg_seg.zamknij()),
-                                          ("Cofnij", lambda: self._pg_seg.cofnij()),
-                                          ("Anuluj", lambda: self._pg_seg.anuluj()))):
-            ctk.CTkButton(self._ramka_obrys, text=tekst, width=80, command=cmd).grid(row=0, column=i, padx=3)
-        self._ramka_obrys_r = 11
-        self._lbl_zn = self._opis(p, "", 12, kolor=("gray20", "gray80"))
-        self._opis(p, "PanDerm działa w osobnym środowisku modeli (PyTorch); obszar szukania to wnętrze znacznika. "
-                      "Maska z pliku musi mieć rozmiar zdjęcia (biały = znamię).", 13)
-        self._dalej(p, 14, 3)
-        self._pg_seg = Podglad(t, "Zdjęcie: narożniki znacznika (zielone), znamię (czerwone)")
+        self._naglowek(p, "Znamię", 5)
+        self._lbl_zn = self._opis(p, "", 6, kolor=("gray20", "gray80"))
+        self._opis(p, "Kolory: zielony – znacznik i narożniki 0–7, czerwony – znamię z PanDerm, niebieski – znamię "
+                      "z CVAT (tylko do porównania, gdy para ma adnotacje).", 7)
+        self._dalej(p, 8, 3)
+        self._pg_seg = Podglad(t, "Zdjęcie: narożniki znacznika i znamię")
         self._pg_seg.grid(row=0, column=1, sticky="nsew", pady=4)
 
-    def _narozniki(self):
-        zrodlo = self._var_nar.get()
-        self._w_tle("Narożniki znacznika", lambda: self.a.ustaw_narozniki(zrodlo), lambda _: self._odswiez_widoki())
+    def _segmentuj(self):
+        a, log = self.a, QueueWriter(self._q)
 
-    def _znamie(self):
-        zrodlo = self._var_zn.get()
-        a = self.a
-        if zrodlo == "cvat":
-            self._w_tle("Znamię z CVAT", a.znamie_z_cvat, lambda _: self._odswiez_widoki())
-        elif zrodlo == "plik":
-            p = filedialog.askopenfilename(title="Maska znamienia (PNG, rozmiar zdjęcia)", initialdir=str(a.folder),
-                                           filetypes=[("Obrazy", "*.png *.jpg *.bmp *.tif"), ("Wszystkie", "*.*")])
-            if p:
-                self._w_tle("Znamię z pliku", lambda: a.znamie_z_pliku(p), lambda _: self._odswiez_widoki())
-        elif zrodlo == "panderm":
-            self._w_tle("Segmentacja PanDerm", self._zadanie_panderm, lambda _: self._odswiez_widoki())
-        else:
-            widok = None
-            if a.narozniki_rgb is not None:
-                widok = ramka(a.narozniki_rgb[geo.OTWOR], a.rgb.shape, 0.35)
-            elif a.maska_znacznika_rgb is not None and a.maska_znacznika_rgb.any():
-                x, y, w, h = cv2.boundingRect(a.maska_znacznika_rgb)
-                widok = ramka(np.array([[x, y], [x + w, y + h]]), a.rgb.shape, 0.1)
-            if widok:
-                self._pg_seg.pokaz(widok)
-            self._ramka_obrys.grid(row=self._ramka_obrys_r, column=0, sticky="ew", padx=7, pady=3)
-            self._ustaw_przyciski(False)
-            self._status("Obrysuj znamię na zdjęciu (lewy klik = punkt, prawy klik = zamknij).", PRACA)
-            self._pg_seg.zacznij_rysowanie(self._po_obrysie, self._po_anulowaniu_obrysu)
-
-    def _po_obrysie(self, pkt):
-        self._ramka_obrys.grid_forget()
-        try:
-            self.a.znamie_z_obrysu(pkt)
-            self._status("Obrys znamienia zapisany.", OK)
-        except BladEtapu as e:
-            messagebox.showerror("Obrys", str(e))
-        self._odswiez_stan()
-        self._odswiez_widoki()
-
-    def _po_anulowaniu_obrysu(self):
-        self._ramka_obrys.grid_forget()
-        self._status("Zaznaczanie anulowane.", SZARY)
-        self._odswiez_stan()
-
-    def _zadanie_panderm(self):
-        from modele_segmentacja.konfiguracja import PYTHON_MODELI
-        a = self.a
-        if not PYTHON_MODELI.exists():
-            raise BladEtapu(f"Nie ma środowiska modeli z PyTorch:\n{PYTHON_MODELI}\n"
-                            "Instrukcja instalacji: projekt/modele_segmentacja/README.md")
-        a.folder.mkdir(parents=True, exist_ok=True)
-        wyj = a.folder / "maska_znamie_panderm.png"
-        wyj.unlink(missing_ok=True)
-        cmd = [str(PYTHON_MODELI), "-m", "modele_segmentacja.segmentuj_znamie", str(a.rgb_path), str(wyj)]
-        mz = a.folder_rejestracji / "dopasowanie_maska_rgb.png"
-        if a.M is not None and mz.exists():
-            cmd += ["--maska-znacznika", str(mz)]
-        self._q.put("> " + " ".join(cmd) + "\n")
-        proc = subprocess.Popen(cmd, cwd=str(PROJEKT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                text=True, encoding="utf-8", errors="replace",
-                                env=dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1"),
-                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        for linia in proc.stdout:
-            self._q.put(linia)
-        if proc.wait() != 0 or not wyj.exists():
-            raise BladEtapu("Segmentacja modelem nie powiodła się – szczegóły w logu na dole okna.")
-        return a.znamie_z_pliku(wyj, "panderm")
+        def zadanie():
+            a.ustaw_narozniki()
+            return a.segmentuj_znamie(log)
+        self._w_tle("Narożniki i znamię (PanDerm)", zadanie, lambda _: self._odswiez_widoki())
 
     # ── 4. przeniesienie ROI ────────────────────────────────────────────────
     def _zakladka_przeniesienie(self, t):
@@ -726,23 +568,12 @@ class Aplikacja(ctk.CTk):
                       "na obraz termowizyjny.", 1)
         self._btn_prz = self._przycisk(p, "Przenieś na termowizję", self._przenies, 2, glowny=True)
         self._lbl_prz = self._opis(p, "", 3, kolor=("gray20", "gray80"))
-        self._naglowek(p, "Termowizja → zdjęcie (T⁻¹)", 4)
-        self._opis(p, "Zaznacz dowolny obszar na termowizji (np. ciepłe miejsce) – zostanie pokazany na zdjęciu.", 5)
-        self._btn_obszar = self._przycisk(p, "Zaznacz obszar na termowizji", self._zaznacz_obszar, 6, glowny=True)
-        self._ramka_obszar = ctk.CTkFrame(p, fg_color="transparent")
-        self._ramka_obszar.columnconfigure((0, 1, 2), weight=1)
-        for i, (tekst, cmd) in enumerate((("Zamknij", lambda: self._pg_prz_ter.zamknij()),
-                                          ("Cofnij", lambda: self._pg_prz_ter.cofnij()),
-                                          ("Anuluj", lambda: self._pg_prz_ter.anuluj()))):
-            ctk.CTkButton(self._ramka_obszar, text=tekst, width=80, command=cmd).grid(row=0, column=i, padx=3)
-        self._btn_usun_obszary = self._przycisk(p, "Usuń zaznaczone obszary", self._usun_obszary, 8)
-        self._lbl_obszary = self._opis(p, "", 9, kolor=("gray20", "gray80"))
         self._naglowek(p, "Widok zdjęcia", 10)
         self._widok_prz = ctk.CTkSegmentedButton(p, values=["Zdjęcie", "Nałożenie"], command=lambda _: self._odswiez_widoki())
         self._widok_prz.set("Zdjęcie")
         self._widok_prz.grid(row=11, column=0, sticky="ew", padx=10, pady=4)
-        self._opis(p, "Kolory: zielony – znacznik ze zdjęcia, fioletowy – znacznik oznaczony na termowizji, "
-                      "czerwony – znamię, niebieski – obszary z termowizji. Przezroczystość nałożenia: suwak w kroku 2.", 12)
+        self._opis(p, "Kolory: zielony – znacznik ze zdjęcia, fioletowy – znacznik na termowizji (z CVAT, gdy para "
+                      "ma adnotacje), czerwony – znamię. Przezroczystość nałożenia: suwak w kroku 2.", 12)
         self._dalej(p, 13, 4)
         prawa = ctk.CTkFrame(t, fg_color="transparent")
         prawa.grid(row=0, column=1, sticky="nsew")
@@ -756,39 +587,12 @@ class Aplikacja(ctk.CTk):
     def _przenies(self):
         self._w_tle("Przeniesienie ROI", self.a.przenies, lambda _: self._odswiez_widoki())
 
-    def _zaznacz_obszar(self):
-        self._ramka_obszar.grid(row=7, column=0, sticky="ew", padx=7, pady=3)
-        self._ustaw_przyciski(False)
-        self._status("Zaznacz obszar na termowizji (lewy klik = punkt, prawy klik = zamknij).", PRACA)
-        self._pg_prz_ter.zacznij_rysowanie(self._po_obszarze, self._po_anulowaniu_obszaru)
-
-    def _po_obszarze(self, pkt):
-        self._ramka_obszar.grid_forget()
-        try:
-            o = self.a.z_termowizji(pkt)
-            self._status(f"Obszar {o['nr']} przeniesiony na zdjęcie.", OK)
-        except BladEtapu as e:
-            messagebox.showerror("Obszar", str(e))
-        self._odswiez_stan()
-        self._odswiez_widoki()
-
-    def _po_anulowaniu_obszaru(self):
-        self._ramka_obszar.grid_forget()
-        self._status("Zaznaczanie anulowane.", SZARY)
-        self._odswiez_stan()
-
-    def _usun_obszary(self):
-        self.a.obszary_z_termowizji = []
-        if self.a.wyniki is not None:
-            self.a.wyniki["obszary_z_termowizji"] = []
-        self._odswiez_widoki()
-
     # ── 5. pomiary ──────────────────────────────────────────────────────────
     def _zakladka_pomiary(self, t):
         p = self._panel(t)
         self._naglowek(p, "Pomiary i zgodność", 0)
         self._opis(p, "Wymiary i kolor znamienia w mm (skala z narożników znacznika), kontrola skali obu "
-                      "modalności i – gdy są adnotacje z CVAT – zgodność rejestracji z wzorcem (badanie E1).", 1)
+                      "modalności i – gdy są adnotacje z CVAT – ocena rejestracji (badanie E1) i maski PanDerm.", 1)
         self._btn_pom = self._przycisk(p, "Oblicz pomiary i zgodność", self._zmierz, 2, glowny=True)
         self._lbl_uwagi = self._opis(p, "", 3, kolor=PRACA)
         self._opis(p, "Kliknij nazwę wielkości w tabeli, żeby zobaczyć jej dokładne objaśnienie.", 4)
@@ -895,22 +699,15 @@ class Aplikacja(ctk.CTk):
 
     # ── wszystkie etapy naraz ───────────────────────────────────────────────
     def _wszystkie_etapy(self):
-        a, model = self.a, self._cmb_model.get()
-        log = QueueWriter(self._q)
+        a, log = self.a, QueueWriter(self._q)
 
         def zadanie():
-            a.rejestruj(model, log=log)
-            a.ustaw_narozniki("cvat")
-            a.znamie_z_cvat()
-            a.przenies()
-            a.zmierz()
+            analizuj(a, log)
             return a.zapisz_raport(), a.ostatnie_obrazy
 
         def po(wynik):
             self._po_rejestracji(a.rej)
             self._po_raporcie(wynik)
-            self._var_nar.set("cvat")
-            self._var_zn.set("cvat")
             self.tabs.set(ZAKLADKI[5])
 
         self._log_wyczysc()
@@ -929,15 +726,17 @@ class Aplikacja(ctk.CTk):
             nak.append(dict(pkt=a.narozniki_rgb, kolor=ZIELONY, punkty=True, etykiety=True))
         if a.maska_znamie is not None:
             nak += [dict(pkt=k, kolor=CZERWONY) for k in geo.kontury(a.maska_znamie)]
-        self._pg_seg.ustaw_nakladki(nak)
+        seg_nak = list(nak)
+        if a.maska_znamie is not None and a.wzorzec is not None:
+            seg_nak += [dict(pkt=k, kolor=NIEBIESKI, grubosc=1) for k in geo.kontury(a.wzorzec["maska_znamie_rgb"])]
+        self._pg_seg.ustaw_nakladki(seg_nak)
         kadr_rgb = ramka(a.narozniki_rgb, a.rgb.shape, 0.25) if a.narozniki_rgb is not None else None
-        if kadr_rgb and not self._pg_seg.rysuje:
+        if kadr_rgb:
             self._pg_seg.przybliz_jesli_calosc(kadr_rgb)
         # krok 4: zdjecie (albo nalozenie) i termowizja
         rgb_nak = list(nak)
         if Mi is not None and nar_t_ref is not None:
             rgb_nak.append(dict(pkt=geo.przenies_punkty(nar_t_ref, Mi), kolor=FIOLET))
-        rgb_nak += [dict(pkt=o["rgb_px"], kolor=NIEBIESKI) for o in a.obszary_z_termowizji]
         warstwa = self._wyrownany if self._widok_prz.get() == "Nałożenie" else None
         self._pg_prz_rgb.alfa = self._suwak.get() / 100
         self._pg_prz_rgb.ustaw(a.rgb, warstwa)
@@ -951,28 +750,32 @@ class Aplikacja(ctk.CTk):
         if pr is not None:
             ter_nak.append(dict(pkt=pr["narozniki"], kolor=ZIELONY))
             ter_nak += [dict(pkt=k, kolor=CZERWONY) for k in pr["kontury_znamienia"]]
-        ter_nak += [dict(pkt=o["termal_px"], kolor=NIEBIESKI) for o in a.obszary_z_termowizji]
         self._pg_prz_ter.ustaw_nakladki(ter_nak)
-        if nar_t_ref is not None and not self._pg_prz_ter.rysuje:
+        if nar_t_ref is not None:
             self._pg_prz_ter.przybliz_jesli_calosc(ramka(nar_t_ref, a.termal.shape, 0.3))
         # opisy
         if a.H_rgb is not None:
             d = a.dopasowanie_naroznikow
-            jak = (f"RMS adnotacji {_f(d.get('rgb_rms_mm'))} / {_f(d.get('termal_rms_mm'))} mm (zdjęcie / termowizja)"
-                   if a.zrodlo_naroznikow == "cvat" else
-                   f"IoU wzorca {_f(d.get('rgb_iou_wzorca'), 3)} / {_f(d.get('termal_iou_wzorca'), 3)} (zdjęcie / termowizja)")
             s = geo.mm_na_px(a.H_rgb, a.narozniki_rgb.mean(0))
-            self._lbl_nar.configure(text=f"Źródło: {'CVAT' if a.zrodlo_naroznikow == 'cvat' else 'automatycznie'}\n"
-                                         f"{jak}\nSkala zdjęcia: {_f(s, 4)} mm/px")
+            tekst = (f"IoU wzorca z maską znacznika: {_f(d.get('rgb_iou_wzorca'), 3)} (zdjęcie), "
+                     f"{_f(d.get('termal_iou_wzorca'), 3)} (termowizja)\nSkala zdjęcia: {_f(s, 4)} mm/px")
+            if a.wzorzec is not None:
+                from analiza import miary
+                b = miary.tre(a.narozniki_rgb, a.wzorzec["narozniki_rgb"], a.wzorzec["H_rgb"])["tre_srednie"]
+                tekst += f"\nOdległość od narożników z CVAT: średnio {_f(b)} mm"
+            self._lbl_nar.configure(text=tekst)
         else:
             self._lbl_nar.configure(text="")
         if a.maska_znamie is not None:
             px = int((a.maska_znamie > 0).sum())
-            tekst = f"Źródło: {a.zrodlo_znamienia}\n{px} px"
+            tekst = f"{OPIS_ZNAMIENIA}: {px} px"
             if a.H_rgb is not None:
                 c = np.argwhere(a.maska_znamie > 0).mean(0)[::-1]
                 pole = px * geo.mm_na_px(a.H_rgb, c) ** 2
                 tekst += f" ≈ {_f(pole)} mm², średnica równoważna {_f(2 * np.sqrt(pole / np.pi))} mm"
+                if a.wzorzec is not None:
+                    pc = int((a.wzorzec["maska_znamie_rgb"] > 0).sum()) * geo.mm_na_px(a.H_rgb, c) ** 2
+                    tekst += f"\nZnamię z CVAT (do porównania): ≈ {_f(pc)} mm²"
             self._lbl_zn.configure(text=tekst)
         else:
             self._lbl_zn.configure(text="")
@@ -983,9 +786,6 @@ class Aplikacja(ctk.CTk):
                                          f"(≈ {_f(float(ul.sum()) * s_t ** 2)} mm²)\nPiksel termowizji: {_f(s_t, 3)} mm")
         else:
             self._lbl_prz.configure(text="")
-        self._lbl_obszary.configure(text="\n".join(
-            f"Obszar {o['nr']}: {_f(o.get('pole_rgb_mm2'))} mm² na zdjęciu, {_f(o.get('pole_termal_mm2'))} mm² na termowizji"
-            for o in a.obszary_z_termowizji))
         self._odswiez_stan()
 
     # ── zadania w tle, stan przyciskow ──────────────────────────────────────
@@ -1045,8 +845,7 @@ class Aplikacja(ctk.CTk):
 
     def _odswiez_stan(self):
         a = self.a
-        rysuje = self._pg_seg.rysuje or self._pg_prz_ter.rysuje
-        wolne = not self._zajete and not rysuje
+        wolne = not self._zajete
         self._ustaw_przyciski(wolne)
         if a is not None and a.wyniki is None:
             self._raport = None                          # wyniki policzone od nowa -> raport nieaktualny
@@ -1059,18 +858,12 @@ class Aplikacja(ctk.CTk):
             wl(self._btn_rej, jest)
             wl(self._btn_rej_wczytaj, jest and (a.folder_rejestracji / "dopasowanie_macierz.txt").exists())
             wl(self._btn_zapisz_nal, self._wyrownany is not None)
-            wl(self._btn_wszystko, jest and a.wzorzec is not None)
-            wl(self._btn_nar, jest and (a.wzorzec is not None if self._var_nar.get() == "cvat" else a.M is not None))
-            wl(self._btn_zn, jest)
+            wl(self._btn_wszystko, jest)
+            wl(self._btn_seg, jest and a.M is not None)
             wl(self._btn_prz, jest and a.M is not None and a.H_rgb is not None and a.maska_znamie is not None)
-            wl(self._btn_obszar, jest and a.M is not None)
-            wl(self._btn_usun_obszary, jest and bool(a.obszary_z_termowizji))
             wl(self._btn_pom, jest and a.przeniesione is not None)
             wl(self._btn_raport, jest and a.przeniesione is not None)
             wl(self._btn_otworz_raport, self._raport is not None)
-        stan_cvat = "normal" if a is not None and a.wzorzec is not None else "disabled"
-        self._rb_nar_cvat.configure(state=stan_cvat)
-        self._rb_zn_cvat.configure(state=stan_cvat)
         nastepny = next((i for i, e in enumerate(ETAPY) if not st.get(e)), None)
         for i, (b, e) in enumerate(zip(self._chipy, ETAPY)):
             if st.get(e):

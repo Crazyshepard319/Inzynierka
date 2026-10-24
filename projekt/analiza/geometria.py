@@ -9,7 +9,6 @@ pokrycia pikseli (siatka gestsza `skala` razy) ma blad ~1% (test: losowe kwadrat
 """
 import cv2
 import numpy as np
-from matplotlib.path import Path as MPath
 
 # narozniki znacznika w kolejnosci wzorca (import_cvat.py): obrys 0..7, otwor = 5, 4, 3, 6
 OBRYS = [0, 1, 2, 3, 4, 5, 6, 7]
@@ -38,6 +37,24 @@ def kontury(maska):
     return wynik
 
 
+def _wewnatrz(q, x0, x1, y0, y1):
+    """Ktore punkty calkowite (x, y) prostokata [x0, x1] x [y0, y1] leza wewnatrz wielokata q (N, 2).
+    Regula parzystosci przeciec: dla kazdego wiersza y liczymy przeciecia bokow z prosta poziomu y
+    i zaznaczamy odcinki miedzy kolejnymi parami przeciec (bez zaleznosci od matplotlib)."""
+    a, b = q, np.roll(q, -1, axis=0)
+    ys = np.arange(y0, y1 + 1, dtype=np.float64)[:, None]                 # (R, 1)
+    ay, by = a[:, 1][None], b[:, 1][None]                                 # (1, N)
+    przec = (ay <= ys) != (by <= ys)                                      # bok przecina poziom y
+    with np.errstate(divide="ignore", invalid="ignore"):
+        x = a[:, 0][None] + (ys - ay) * (b[:, 0] - a[:, 0])[None] / (by - ay)
+    x = np.where(przec, x, np.inf)
+    x.sort(axis=1)
+    xs = np.arange(x0, x1 + 1, dtype=np.float64)
+    # liczba przeciec na lewo od punktu: nieparzysta = wewnatrz
+    ile = (x[:, :, None] < xs[None, None, :]).sum(axis=1)
+    return (ile % 2) == 1
+
+
 def wypelnij(wielokaty, ksztalt, skala=1):
     """Maska bool w siatce `ksztalt` (h, w) zageszczonej `skala` razy; wielokaty we wsp. siatki 1x.
     Piksel nalezy do maski, gdy jego srodek lezy wewnatrz wielokata (bez systematycznego zawyzania pola,
@@ -51,9 +68,7 @@ def wypelnij(wielokaty, ksztalt, skala=1):
         x1, y1 = np.minimum(np.ceil(q.max(0)).astype(int), [W - 1, H - 1])
         if x1 < x0 or y1 < y0:
             continue
-        yy, xx = np.mgrid[y0:y1 + 1, x0:x1 + 1]
-        wewn = MPath(q).contains_points(np.c_[xx.ravel(), yy.ravel()]).reshape(yy.shape)
-        m[y0:y1 + 1, x0:x1 + 1] |= wewn
+        m[y0:y1 + 1, x0:x1 + 1] |= _wewnatrz(q, x0, x1, y0, y1)
     return m
 
 

@@ -1,27 +1,30 @@
 """
 Etapy systemu dla jednej pary RGB - termowizja (schemat "Projekt systemu" w planie pracy).
 Ten sam kod wykonuje aplikacja (aplikacja.py, krok po kroku) i potok wsadowy (potok_pary.py).
+Wszystko jest wyznaczane automatycznie; adnotacje z CVAT sluza tylko do oceny wynikow.
 
   1. Wejscie        Analiza(zdjecie, termowizja) albo Analiza.z_pary(n); dla par z bazy takze
-                    wzorzec reczny z CVAT (maski, narozniki znacznika)
-  2. Rejestracja    rejestruj()          macierz T: piksel RGB -> piksel termowizji (dopasowanie3.py;
-                                         znacznik wykrywany automatycznie, adnotacje NIE sa uzywane)
-  3. Segmentacja    ustaw_narozniki()    8 naroznikow znacznika 35 x 26 mm -> homografia px -> mm
-                                         (CVAT albo automatycznie: wzorzec Π dopasowany do maski znacznika)
-                    znamie_z_*()         maska znamienia na zdjeciu (CVAT, plik/PanDerm, obrys reczny)
-  4. Przeniesienie  przenies()           znamie i znacznik: zdjecie -> termowizja (T)
-                    z_termowizji()       obszar zaznaczony na termowizji -> zdjecie (T^-1)
-  5. Pomiary        zmierz()             wymiary w mm i kolor znamienia, kontrola skali, zgodnosc
-                                         z wzorcem z CVAT (badanie E1) i segmentacji znamienia z CVAT
+                    wzorzec reczny z CVAT (tylko do oceny)
+  2. Rejestracja    rejestruj()          macierz T: piksel RGB -> piksel termowizji (dopasowanie3.py,
+                                         model przeksztalcenia z dopasowanie3.MODEL)
+  3. Segmentacja    ustaw_narozniki()    wzorzec Π 35 x 26 mm dopasowany do maski znacznika z rejestracji
+                                         -> 8 naroznikow -> homografia px -> mm (skala)
+                    segmentuj_znamie()   znamie na zdjeciu: PanDerm (model M1) we wnetrzu znacznika
+  4. Przeniesienie  przenies()           znamie, obrys i otwor znacznika: zdjecie -> termowizja (T)
+  5. Pomiary        zmierz()             wymiary w mm i kolor znamienia, kontrola skali; gdy sa adnotacje:
+                                         zgodnosc z CVAT (badanie E1) i segmentacji PanDerm z CVAT
   6. Raport         zapisz_raport()      raport.html + metryki.json + obrazy PNG
 
 Temperatury (mapa °C z SEQ, dane/pary/N/termal_C.npy) nie sa czescia raportu - funkcja
 pomiary.parametry_termiczne zostaje do ewentualnego uzycia.
 """
 import contextlib
+import importlib.util
 import io
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -38,12 +41,9 @@ from . import geometria as geo, miary, obrazy, pomiary, raport   # noqa: E402
 from .dane import DANE, INZ, PARY, imread, info_pary, wzorzec_pary   # noqa: E402
 
 GESTOSC = 4      # przeniesione obszary w siatce termowizji 4x gestszej (dokladnosc pola ~1%)
-POLE_OTWORU_MM2 = (cvat.BELKA - 2 * cvat.PASEK) * (cvat.RAMIE - cvat.PASEK)     # 15 x 16 = 240 mm2
-MODELE_REJESTRACJI = ("auto", "afiniczna", "homografia")
-ZRODLA_NAROZNIKOW = {"cvat": "adnotacja z CVAT",
-                     "auto": "automatycznie (wzorzec Π dopasowany do maski znacznika z rejestracji)"}
-ZRODLA_ZNAMIENIA = {"cvat": "adnotacja z CVAT", "plik": "maska z pliku",
-                    "obrys": "obrys zaznaczony ręcznie", "panderm": "PanDerm (model M1)"}
+POLE_OTWORU_MM2 = (dop.BELKA - 2 * dop.PASEK) * (dop.RAMIE - dop.PASEK)     # 15 x 16 = 240 mm2
+OPIS_NAROZNIKOW = "automatycznie (wzorzec Π dopasowany do maski znacznika z rejestracji)"
+OPIS_ZNAMIENIA = "PanDerm (model M1)"
 ETAPY = ("wejscie", "rejestracja", "segmentacja", "przeniesienie", "pomiary", "raport")
 
 
@@ -88,10 +88,10 @@ def narozniki_wzorca(maska, homografia=True):
     m = (np.asarray(maska) > 0).astype(np.uint8) * 255
     if cv2.countNonZero(m) < 50:
         raise BladEtapu("maska znacznika jest pusta albo za mala")
-    R = np.sqrt(cv2.countNonZero(m) / cv2.contourArea(cvat.WZORZEC_MM.astype(np.float32)))   # px maski / mm
-    marg = int(round(0.3 * cvat.BELKA * R))
-    wz = cvat.WZORZEC_MM * R + marg
-    t = np.zeros((int(np.ceil(cvat.RAMIE * R)) + 2 * marg, int(np.ceil(cvat.BELKA * R)) + 2 * marg), np.uint8)
+    R = np.sqrt(cv2.countNonZero(m) / cv2.contourArea(dop.WZORZEC_MM.astype(np.float32)))   # px maski / mm
+    marg = int(round(0.3 * dop.BELKA * R))
+    wz = dop.WZORZEC_MM * R + marg
+    t = np.zeros((int(np.ceil(dop.RAMIE * R)) + 2 * marg, int(np.ceil(dop.BELKA * R)) + 2 * marg), np.uint8)
     cv2.fillPoly(t, [np.round(wz * 16).astype(np.int32)], 255, cv2.LINE_AA, 4)
     with contextlib.redirect_stdout(io.StringIO()):
         W, _, _ = dop._podobienstwo(t, m)
@@ -147,7 +147,13 @@ class Analiza:
         nazwa = f"para_{self.para}" if self.para is not None else f"{self.rgb_path.stem}__{self.ter_path.stem}"
         self.folder = Path(folder) if folder else INZ / "wyniki" / "wyniki_obu" / nazwa
         self.folder_rejestracji = INZ / "wyniki" / "wyniki_dopasowania" / nazwa
-        self._wyczysc()
+        self.M, self.rej = None, {}
+        self.maska_znacznika_rgb = self.maska_znacznika_termal = None     # maski z rejestracji
+        self._maska_rgb_rob, self._sc = None, None
+        self.narozniki_rgb = self.H_rgb = self.narozniki_termal = self.H_termal = None
+        self.dopasowanie_naroznikow = {}
+        self.maska_znamie = None
+        self.przeniesione, self.wyniki, self.ostatnie_obrazy = None, None, {}
 
     @classmethod
     def z_pary(cls, n, folder=None):
@@ -155,27 +161,6 @@ class Analiza:
         return cls(k / "rgb.jpg", k / "termal.jpg", para=n, folder=folder)
 
     # ── stan ────────────────────────────────────────────────────────────────
-    def _wyczysc(self):
-        """Stan poczatkowy: brak wynikow etapow 2-6."""
-        self.M, self.rej = None, {}
-        self.maska_znacznika_rgb = self.maska_znacznika_termal = None     # maski klasyczne z rejestracji
-        self._maska_rgb_rob, self._sc = None, None
-        self.narozniki_rgb = self.H_rgb = self.narozniki_termal = self.H_termal = None
-        self.zrodlo_naroznikow, self.dopasowanie_naroznikow = None, {}
-        self._folia_rgb = self._folia_termal = None
-        self.maska_znamie, self.zrodlo_znamienia = None, None
-        self.przeniesione, self.obszary_z_termowizji, self.wyniki = None, [], None
-        self.ostatnie_obrazy = {}
-
-    def _po_nowej_rejestracji(self):
-        """Nowa macierz T uniewaznia przeniesienie i pomiary oraz narozniki automatyczne
-        (licza sie z masek z rejestracji); maska znamienia i narozniki z CVAT zostaja."""
-        if self.zrodlo_naroznikow == "auto":
-            self.narozniki_rgb = self.H_rgb = self.narozniki_termal = self.H_termal = None
-            self.zrodlo_naroznikow, self.dopasowanie_naroznikow = None, {}
-            self._folia_rgb = self._folia_termal = None
-        self.przeniesione, self.obszary_z_termowizji, self.wyniki = None, [], None
-
     def stan(self):
         """Ktore etapy sa wykonane (dla aplikacji)."""
         return {"wejscie": True, "rejestracja": self.M is not None,
@@ -190,7 +175,7 @@ class Analiza:
     def _wymagaj(self, *co):
         braki = {"rejestracja": (self.M is None, "Najpierw wykonaj rejestrację (krok 2)."),
                  "narozniki": (self.H_rgb is None, "Najpierw wyznacz narożniki znacznika (krok 3)."),
-                 "znamie": (self.maska_znamie is None, "Najpierw wyznacz znamię na zdjęciu (krok 3)."),
+                 "znamie": (self.maska_znamie is None, "Najpierw wyznacz znamię (krok 3)."),
                  "przeniesienie": (self.przeniesione is None, "Najpierw przenieś obszary na termowizję (krok 4)."),
                  "pomiary": (self.wyniki is None, "Najpierw policz pomiary (krok 5).")}
         for c in co:
@@ -198,24 +183,26 @@ class Analiza:
                 raise BladEtapu(braki[c][1])
 
     # ── 2. rejestracja ──────────────────────────────────────────────────────
-    def rejestruj(self, model="auto", log=None):
-        """Rejestracja dopasowanie3.run_registration; log: dodatkowy strumien na komunikaty (aplikacja)."""
-        if model not in MODELE_REJESTRACJI:
-            raise BladEtapu(f"Nieznany model rejestracji: {model}")
+    def rejestruj(self, log=None):
+        """Rejestracja dopasowanie3.run_registration (model dopasowanie3.MODEL);
+        log: dodatkowy strumien na komunikaty (aplikacja)."""
         kat = self.folder_rejestracji
         kat.mkdir(parents=True, exist_ok=True)
         bufor = io.StringIO()
         with contextlib.redirect_stdout(_Tee(bufor, log) if log is not None else bufor):
-            dop.run_registration(self.rgb_path, self.ter_path, kat / "dopasowanie.png", model)
+            dop.run_registration(self.rgb_path, self.ter_path, kat / "dopasowanie.png", dop.MODEL)
         (kat / "rejestracja_log.txt").write_text(bufor.getvalue(), encoding="utf-8")
-        return self.wczytaj_rejestracje(model)
+        return self.wczytaj_rejestracje()
 
-    def wczytaj_rejestracje(self, model=None):
+    def wczytaj_rejestracje(self):
         """Wynik rejestracji zapisany wczesniej w folderze_rejestracji (bez liczenia od nowa)."""
         kat = self.folder_rejestracji
         if not (kat / "dopasowanie_macierz.txt").exists():
             raise BladEtapu(f"Brak zapisanej rejestracji w {kat}")
-        self._po_nowej_rejestracji()
+        # nowa macierz T: narozniki (z masek rejestracji), przeniesienie i pomiary od nowa; znamie zostaje
+        self.narozniki_rgb = self.H_rgb = self.narozniki_termal = self.H_termal = None
+        self.dopasowanie_naroznikow = {}
+        self.przeniesione, self.wyniki = None, None
         log = (kat / "rejestracja_log.txt").read_text(encoding="utf-8") if (kat / "rejestracja_log.txt").exists() else ""
         self.M = np.loadtxt(kat / "dopasowanie_macierz.txt")
         try:
@@ -223,12 +210,13 @@ class Analiza:
         except ValueError:
             folder = str(kat)
         rej = {"macierz_T": self.M.tolist(), "folder": folder}
-        if model:
-            rej["model_zadany"] = model
         if m := re.search(r"=> wybrany model: (\w+)", log):
             rej["model"] = m.group(1)
         if m := re.findall(r"Dice=([\d.]+)\s+sredni blad krawedzi=([\d.]+) px termal \(", log):
             rej["dice_wewnetrzny"], rej["blad_krawedzi_px"] = float(m[-1][0]), float(m[-1][1])
+        for modalnosc in ("termal", "rgb"):
+            if m := re.search(rf"\[{modalnosc}\]\s.*zgodnosc z wzorcem Pi=([\d.]+)", log):
+                rej[f"zgodnosc_{modalnosc}"] = float(m.group(1))
         self.rej = rej
         m = imread(kat / "dopasowanie_maska_rgb.png", cv2.IMREAD_GRAYSCALE)
         self.maska_znacznika_termal = imread(kat / "dopasowanie_maska_termal.png", cv2.IMREAD_GRAYSCALE)
@@ -239,34 +227,22 @@ class Analiza:
         return rej
 
     # ── 3. segmentacja: znacznik (skala mm) i znamie ────────────────────────
-    def ustaw_narozniki(self, zrodlo="cvat"):
-        """Narozniki znacznika na zdjeciu i termowizji oraz homografie px -> mm."""
-        if zrodlo == "cvat":
-            if self.wzorzec is None:
-                raise BladEtapu("Te obrazy nie mają adnotacji z CVAT - wybierz narożniki automatyczne.")
-            wz = self.wzorzec
-            self.narozniki_rgb, self.H_rgb = wz["narozniki_rgb"], wz["H_rgb"]
-            self.narozniki_termal, self.H_termal = wz["narozniki_termal"], wz["H_termal"]
-            self._folia_rgb, self._folia_termal = wz["maska_znacznik_rgb"], wz["maska_znacznik_termal"]
-            self.dopasowanie_naroznikow = {"rgb_rms_mm": wz["rms_rgb_mm"], "termal_rms_mm": wz["rms_termal_mm"]}
-        elif zrodlo == "auto":
-            self._wymagaj("rejestracja")
-            if self._maska_rgb_rob is None or self.maska_znacznika_termal is None:
-                raise BladEtapu("Brak masek znacznika z rejestracji - uruchom rejestrację ponownie.")
-            k, iou = narozniki_wzorca(self._maska_rgb_rob)
-            q, H, _ = cvat.dopasuj_narozniki(k / self._sc)
-            kt, iou_t = narozniki_wzorca(self.maska_znacznika_termal)
-            qt, Ht, _ = cvat.dopasuj_narozniki(kt)
-            self.narozniki_rgb, self.H_rgb, self.narozniki_termal, self.H_termal = q, H, qt, Ht
-            self._folia_rgb, self._folia_termal = self.maska_znacznika_rgb, self.maska_znacznika_termal
-            self.dopasowanie_naroznikow = {"rgb_iou_wzorca": iou, "termal_iou_wzorca": iou_t}
-        else:
-            raise BladEtapu(f"Nieznane źródło narożników: {zrodlo}")
-        self.zrodlo_naroznikow = zrodlo
-        self.przeniesione, self.obszary_z_termowizji, self.wyniki = None, [], None
+    def ustaw_narozniki(self):
+        """Narozniki znacznika na zdjeciu i termowizji (wzorzec Π dopasowany do masek z rejestracji)
+        oraz homografie px -> mm."""
+        self._wymagaj("rejestracja")
+        if self._maska_rgb_rob is None or self.maska_znacznika_termal is None:
+            raise BladEtapu("Brak masek znacznika z rejestracji - uruchom rejestrację ponownie.")
+        k, iou = narozniki_wzorca(self._maska_rgb_rob)
+        q, H, _ = cvat.dopasuj_narozniki(k / self._sc)
+        kt, iou_t = narozniki_wzorca(self.maska_znacznika_termal)
+        qt, Ht, _ = cvat.dopasuj_narozniki(kt)
+        self.narozniki_rgb, self.H_rgb, self.narozniki_termal, self.H_termal = q, H, qt, Ht
+        self.dopasowanie_naroznikow = {"rgb_iou_wzorca": iou, "termal_iou_wzorca": iou_t}
+        self.przeniesione, self.wyniki = None, None
         return self.narozniki_rgb
 
-    def ustaw_znamie(self, maska, zrodlo):
+    def ustaw_znamie(self, maska):
         m = np.asarray(maska)
         if m.ndim == 3:
             m = m.max(axis=2)
@@ -276,26 +252,47 @@ class Analiza:
         if not (m > 0).any():
             raise BladEtapu("Maska znamienia jest pusta.")
         self.maska_znamie = (m > 0).astype(np.uint8) * 255
-        self.zrodlo_znamienia = zrodlo
-        self.przeniesione, self.obszary_z_termowizji, self.wyniki = None, [], None
+        self.przeniesione, self.wyniki = None, None
         return self.maska_znamie
 
-    def znamie_z_cvat(self):
-        if self.wzorzec is None:
-            raise BladEtapu("Te obrazy nie mają adnotacji znamienia z CVAT.")
-        return self.ustaw_znamie(self.wzorzec["maska_znamie_rgb"], "cvat")
-
-    def znamie_z_pliku(self, sciezka, zrodlo="plik"):
-        m = imread(sciezka, cv2.IMREAD_GRAYSCALE)
-        if m is None:
-            raise BladEtapu(f"Nie można otworzyć maski: {sciezka}")
-        return self.ustaw_znamie(m, zrodlo)
-
-    def znamie_z_obrysu(self, pkt):
-        """Wielokat zaznaczony na zdjeciu (punkty w px zdjecia)."""
-        if len(pkt) < 3:
-            raise BladEtapu("Obrys musi mieć co najmniej 3 punkty.")
-        return self.ustaw_znamie(geo.wypelnij([np.asarray(pkt, np.float64)], self.rgb.shape[:2]), "obrys")
+    def segmentuj_znamie(self, log=None):
+        """Znamie modelem PanDerm we wnetrzu znacznika (obszar z maski znacznika z rejestracji).
+        W srodowisku z PyTorch (np. potok_pary.py w srodowisku modeli) - w tym procesie;
+        bez PyTorch (aplikacja) - skrypt modele_segmentacja/segmentuj_znamie.py w srodowisku modeli.
+        Maska jest tez zapisywana jako <folder>/maska_znamie_panderm.png."""
+        pisz = (lambda t: log.write(t + "\n")) if log is not None else (lambda t: None)
+        self.folder.mkdir(parents=True, exist_ok=True)
+        wyj = self.folder / "maska_znamie_panderm.png"
+        if importlib.util.find_spec("torch") is not None:
+            from modele_segmentacja.segmentuj_znamie import BladSegmentacji, segmentuj
+            try:
+                maska = segmentuj(self.rgb, self._maska_rgb_rob, log=pisz)
+            except BladSegmentacji as e:
+                raise BladEtapu(str(e)) from None
+            dop.imwrite(wyj, maska)
+            return self.ustaw_znamie(maska)
+        from modele_segmentacja.konfiguracja import PYTHON_MODELI
+        if not PYTHON_MODELI.exists():
+            raise BladEtapu(f"Nie ma środowiska modeli z PyTorch:\n{PYTHON_MODELI}\n"
+                            "Instrukcja instalacji: projekt/modele_segmentacja/README.md")
+        wyj.unlink(missing_ok=True)
+        cmd = [str(PYTHON_MODELI), "-m", "modele_segmentacja.segmentuj_znamie", str(self.rgb_path), str(wyj)]
+        mz = self.folder_rejestracji / "dopasowanie_maska_rgb.png"
+        if self.M is not None and mz.exists():
+            cmd += ["--maska-znacznika", str(mz)]
+        pisz("> " + " ".join(cmd))
+        proc = subprocess.Popen(cmd, cwd=str(PROJEKT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, encoding="utf-8", errors="replace",
+                                env=dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1"),
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        for linia in proc.stdout:
+            pisz(linia.rstrip("\n"))
+        if proc.wait() != 0 or not wyj.exists():
+            raise BladEtapu("Segmentacja PanDerm nie powiodła się – szczegóły w logu.")
+        maska = imread(wyj, cv2.IMREAD_GRAYSCALE)
+        if maska is None:
+            raise BladEtapu(f"Nie można otworzyć maski: {wyj}")
+        return self.ustaw_znamie(maska)
 
     # ── 4. przeniesienie obszarow ───────────────────────────────────────────
     def przenies(self):
@@ -312,30 +309,10 @@ class Analiza:
         self.wyniki = None
         return self.przeniesione
 
-    def z_termowizji(self, pkt_termal):
-        """Obszar zaznaczony na termowizji -> zdjecie (przez T^-1); zwraca opis obszaru."""
-        self._wymagaj("rejestracja")
-        if len(pkt_termal) < 3:
-            raise BladEtapu("Obszar musi mieć co najmniej 3 punkty.")
-        p = np.asarray(pkt_termal, np.float64)
-        q = geo.przenies_punkty(p, np.linalg.inv(self.M))
-        o = {"nr": len(self.obszary_z_termowizji) + 1, "termal_px": p, "rgb_px": q}
-        if self.H_rgb is not None:
-            o["pole_rgb_mm2"] = _pole_wielokata_mm2(q, self.H_rgb)
-        if self.H_termal is not None:
-            o["pole_termal_mm2"] = _pole_wielokata_mm2(p, self.H_termal)
-        self.obszary_z_termowizji.append(o)
-        if self.wyniki is not None:
-            self.wyniki["obszary_z_termowizji"] = self._opis_obszarow()
-        return o
-
-    def _opis_obszarow(self):
-        return [{k: v for k, v in o.items()} for o in self.obszary_z_termowizji]
-
     # ── 5. pomiary i zgodnosc ───────────────────────────────────────────────
     def zmierz(self):
         self._wymagaj("przeniesienie")
-        p_rgb = pomiary.parametry_rgb(self.rgb, self.maska_znamie, self.H_rgb, self._folia_rgb)
+        p_rgb = pomiary.parametry_rgb(self.rgb, self.maska_znamie, self.H_rgb, self.maska_znacznika_rgb)
         ul = self.przeniesione["ulamek"]
         s_t = geo.mm_na_px(self.H_termal, self.narozniki_termal.mean(0))
         kontrola = {
@@ -348,17 +325,15 @@ class Analiza:
             "pole_otworu_wzorzec_mm2": POLE_OTWORU_MM2,
         }
         kontrola["stosunek_pol_otworu"] = kontrola["pole_otworu_przeniesionego_mm2"] / kontrola["pole_otworu_termal_mm2"]
-        w = {"info": dict(self.info),
-             "zrodla": {"narozniki": ZRODLA_NAROZNIKOW[self.zrodlo_naroznikow],
-                        "znamie": ZRODLA_ZNAMIENIA.get(self.zrodlo_znamienia, self.zrodlo_znamienia),
-                        "narozniki_klucz": self.zrodlo_naroznikow, "znamie_klucz": self.zrodlo_znamienia},
+        w = {"info": dict(self.info), "zrodla": {"narozniki": OPIS_NAROZNIKOW, "znamie": OPIS_ZNAMIENIA},
              "rejestracja": self.rej, "narozniki": self.dopasowanie_naroznikow,
              "pomiary_rgb": p_rgb, "pierscien_mm": pomiary.PIERSCIEN_MM, "kontrola_skali": kontrola,
-             "zgodnosc": None, "segmentacja_vs_cvat": None, "obszary_z_termowizji": self._opis_obszarow()}
+             "zgodnosc": None, "segmentacja_vs_cvat": None}
         wz = self.wzorzec
-        if wz is not None:                                   # badanie E1: wzorzec z CVAT na termowizji
+        if wz is not None:                                   # ocena: wzorzec z CVAT
+            # E1 (sama rejestracja): narozniki z CVAT na zdjeciu przeniesione przez T vs narozniki z CVAT na termowizji
             ks = self.termal.shape[:2]
-            nar_T = self.przeniesione["narozniki"]
+            nar_T = geo.przenies_punkty(wz["narozniki_rgb"], self.M)
             s_wz = geo.mm_na_px(wz["H_termal"], wz["narozniki_termal"].mean(0))
             w["zgodnosc"] = {
                 "tre": miary.tre(nar_T, wz["narozniki_termal"], wz["H_termal"]),
@@ -368,9 +343,11 @@ class Analiza:
                 "otwor": miary.zgodnosc_masek(geo.wypelnij([nar_T[geo.OTWOR]], ks, GESTOSC),
                                               geo.wypelnij([wz["narozniki_termal"][geo.OTWOR]], ks, GESTOSC),
                                               s_wz / GESTOSC)}
-            if self.zrodlo_znamienia != "cvat":
-                w["segmentacja_vs_cvat"] = miary.zgodnosc_masek(self.maska_znamie > 0, wz["maska_znamie_rgb"] > 0,
-                                                                p_rgb["mm_na_px"])
+            w["segmentacja_vs_cvat"] = miary.zgodnosc_masek(self.maska_znamie > 0, wz["maska_znamie_rgb"] > 0,
+                                                            p_rgb["mm_na_px"])
+            pole_cvat = pomiary.parametry_rgb(self.rgb, wz["maska_znamie_rgb"], self.H_rgb)["pole_mm2"]
+            w["segmentacja_vs_cvat"]["pole_cvat_mm2"] = pole_cvat
+            w["narozniki"]["rgb_blad_vs_cvat_mm"] = miary.tre(self.narozniki_rgb, wz["narozniki_rgb"], wz["H_rgb"])["tre_srednie"]
         self.wyniki = w
         return w
 
@@ -395,12 +372,11 @@ class Analiza:
         return sciezka
 
 
-def analizuj_pare(n, model="auto", narozniki="cvat", folder=None, log=None):
-    """Caly potok dla pary z bazy na wzorcu z CVAT (znamie i narozniki) - jak potok_pary.py."""
-    a = Analiza.z_pary(n, folder)
-    a.rejestruj(model, log)
-    a.ustaw_narozniki(narozniki)
-    a.znamie_z_cvat()
+def analizuj(a, log=None):
+    """Wszystkie etapy po kolei (aplikacja: "Wykonaj wszystkie etapy", potok_pary.py)."""
+    a.rejestruj(log)
+    a.ustaw_narozniki()
+    a.segmentuj_znamie(log)
     a.przenies()
     a.zmierz()
     return a

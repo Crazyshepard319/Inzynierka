@@ -71,8 +71,9 @@ OBJASNIENIA = [
     ]),
     ("Zgodność między modalnościami", [
         ("tre", "TRE – błąd położenia narożników",
-         "Target Registration Error. Dla każdego z 8 narożników znacznika: punkt oznaczony na zdjęciu przeniesiony "
-         "przez T i ten sam narożnik oznaczony ręcznie na termowizji. Odległość liczona w milimetrach na płaszczyźnie "
+         "Target Registration Error. Dla każdego z 8 narożników znacznika: narożnik oznaczony ręcznie (CVAT) na zdjęciu "
+         "przeniesiony przez T i ten sam narożnik oznaczony ręcznie na termowizji – ocena samej rejestracji, bez "
+         "błędu automatycznych narożników. Odległość liczona w milimetrach na płaszczyźnie "
          "znacznika (homografia termowizji px → mm). Raport podaje średnią i maksimum z 8 narożników. "
          "Punkty odniesienia: rozmiar piksela termowizji (tabela kontroli skali; w tych danych ok. 0,2 mm) oraz "
          "niepewność samych adnotacji – oznaczone narożniki odbiegają od idealnego kształtu 35 × 26 mm średnio "
@@ -104,27 +105,26 @@ OBJASNIENIA = [
          "szeroko oznaczono krawędź folii w obu obrazach."),
     ]),
     ("Kontrola skali i rozdzielczości", [
-        ("rms", "Dopasowanie narożników do wzorca",
+        ("rms", "Narożniki znacznika (automatyczne)",
          "Skalę w mm daje homografia z 8 narożników znacznika do jego wymiarów (belka 35 mm, ramiona 26 mm, pasek "
-         "10 mm). <b>RMS</b> (dla narożników z CVAT) to średni kwadratowy błąd, z jakim oznaczone narożniki pasują "
-         "do tego kształtu po homografii; powyżej 1 mm warto sprawdzić adnotację albo krzywiznę skóry. "
-         "<b>IoU wzorca</b> (dla narożników automatycznych) to pokrycie maski znacznika przez dopasowany kształt Π; "
-         "poniżej ok. 0,8 dopasowanie jest niepewne."),
+         "10 mm). Narożniki są wyznaczane automatycznie: wzorzec Π o tych wymiarach jest dopasowywany do maski "
+         "znacznika z rejestracji (najpierw obrót, skala i położenie, potem przekształcenie afiniczne i homografia "
+         "metodą ECC), a narożniki to 8 wierzchołków dopasowanego wzorca. <b>IoU wzorca</b> to pokrycie maski "
+         "znacznika przez dopasowany kształt Π; poniżej ok. 0,8 dopasowanie jest niepewne. <b>Błąd względem CVAT</b> "
+         "(dla par z adnotacjami) to średnia odległość 8 narożników automatycznych od oznaczonych ręcznie, w mm."),
         ("otwor240", "Pole otworu na termowizji",
          "Nominalnie otwór znacznika ma 15 × 16 mm = 240 mm². Porównujemy dwa pola zmierzone w mm na termowizji "
          "(homografią termowizji): otworu przeniesionego ze zdjęcia przez T i otworu wyznaczonego na samej "
-         "termowizji (narożniki z CVAT albo automatyczne). Ich stosunek (1 = równe) to łączny błąd rejestracji "
-         "i skali, dostępny także bez adnotacji. Przy narożnikach z CVAT pole otworu odbiega od 240 mm² już na "
-         "pojedynczym obrazie, bo oznaczony kształt nie jest idealnym Π (RMS narożników); przy narożnikach "
-         "automatycznych wynosi 240 mm² z definicji."),
+         "termowizji (narożniki dopasowane do maski znacznika na termowizji, więc 240 mm² z definicji). Ich "
+         "stosunek (1 = równe) to łączny błąd rejestracji i skali, dostępny także bez adnotacji."),
         ("pole_tr", "Pole znamienia: termowizja / RGB",
          "Pole maski znamienia przeniesionej na termowizję (suma ułamków pokrycia pikseli × rozmiar piksela²) "
          "podzielone przez pole zmierzone na zdjęciu. Obie wartości liczone są niezależnymi skalami "
          "(narożniki na zdjęciu i na termowizji), więc wynik bliski 1 potwierdza spójność skali i rejestracji."),
         ("px_t", "Znamię na termowizji (piksele) i rozmiar piksela",
          "Ile pikseli termowizji obejmuje przeniesione znamię (piksele częściowo pokryte liczą się ułamkiem) oraz "
-         "ile milimetrów skóry przypada na jeden piksel kamery (320 × 240). Przy kilku–kilkunastu pikselach "
-         "każdy pomiar na termowizji w obrębie znamienia jest mało pewny – to ograniczenie rozdzielczości kamery."),
+         "ile milimetrów skóry przypada na jeden piksel kamery (320 × 240; w tych danych ok. 0,2 mm). Przy kilku–"
+         "kilkunastu pikselach pomiar na termowizji w obrębie znamienia byłby mało pewny."),
     ]),
     ("Znamię na zdjęciu RGB", [
         ("skala", "Skala (mm/px)",
@@ -166,14 +166,12 @@ OBJASNIENIA = [
          "znamienia i pierścienia skóry. Ok. 2,3 to próg ledwo zauważalnej różnicy; powyżej 10 kontrast jest "
          "wyraźny."),
     ]),
-    ("Segmentacja znamienia i obszary z termowizji", [
-        ("seg", "Segmentacja vs adnotacja z CVAT",
-         "Gdy znamię wyznaczono inną metodą niż adnotacja (PanDerm, obrys ręczny, plik), jego maska jest "
-         "porównywana z maską z CVAT tymi samymi miarami co obszary między modalnościami (Dice, IoU, HD95, ASSD, "
-         "przesunięcie środków, stosunek pól), w mm na zdjęciu. To ocena segmentacji (model M1), a nie rejestracji."),
-        ("obszar_t", "Obszar zaznaczony na termowizji",
-         "Wielokąt zaznaczony na obrazie termowizyjnym i przeniesiony na zdjęcie przez T⁻¹ (przenoszenie ROI "
-         "w drugą stronę, np. ciepłe miejsce pokazane na zdjęciu). Pole podawane jest w mm² z obu skal."),
+    ("Segmentacja znamienia", [
+        ("seg", "PanDerm a adnotacja z CVAT",
+         "Znamię wyznacza model PanDerm (M1) we wnętrzu znacznika. Gdy para ma adnotację z CVAT, maska PanDerm "
+         "jest porównywana z maską oznaczoną ręcznie tymi samymi miarami co obszary między modalnościami (Dice, "
+         "IoU, HD95, ASSD, przesunięcie środków, stosunek pól), w mm na zdjęciu. To ocena segmentacji (model M1), "
+         "a nie rejestracji; stosunek pól powyżej 1 znaczy, że PanDerm zawyża obszar znamienia."),
     ]),
 ]
 
@@ -213,9 +211,10 @@ def uwagi(w):
     odch = ks["stosunek_pol_otworu"] - 1
     if abs(odch) > 0.10:
         u.append(f"Pole otworu przeniesionego ze zdjęcia różni się od wyznaczonego na termowizji o {_f(100 * odch, 0)}%.")
-    for k, nazwa in (("rgb_rms_mm", "na zdjęciu"), ("termal_rms_mm", "na termowizji")):
-        if nar.get(k) is not None and nar[k] > 1.0:
-            u.append(f"Narożniki {nazwa} pasują do wzorca 35 × 26 mm z RMS {_f(nar[k])} mm > 1 mm.")
+    rej = w.get("rejestracja", {})
+    for k, nazwa in (("zgodnosc_rgb", "na zdjęciu"), ("zgodnosc_termal", "na termowizji")):
+        if rej.get(k) is not None and rej[k] < 0.65:
+            u.append(f"Znacznik {nazwa} wykryty niepewnie (zgodność kształtu z Π {_f(rej[k])}) – sprawdź nałożenie.")
     for k, nazwa in (("rgb_iou_wzorca", "na zdjęciu"), ("termal_iou_wzorca", "na termowizji")):
         if nar.get(k) is not None and nar[k] < 0.8:
             u.append(f"Automatyczne narożniki {nazwa} są niepewne (IoU wzorca {_f(nar[k])}).")
@@ -233,8 +232,8 @@ def sekcje(w):
     wynik = []
     if zg:
         wynik.append(("Zgodność między modalnościami (badanie E1)",
-                      "Wzorzec: znacznik oznaczony ręcznie w CVAT na termowizji. Obszar A = przeniesiony ze zdjęcia "
-                      "przez T, B = oznaczony na termowizji.", [
+                      "Ocena samej rejestracji: znacznik oznaczony ręcznie w CVAT na zdjęciu przeniesiony przez T (A) "
+                      "i oznaczony ręcznie w CVAT na termowizji (B).", [
             ("tre", "Średni błąd narożników (TRE)", f"{_f(zg['tre']['tre_srednie'])} mm", "średnia odległość 8 narożników przeniesionych ze zdjęcia od oznaczonych na termowizji"),
             ("tre", "Maks. błąd narożnika", f"{_f(zg['tre']['tre_max'])} mm", "najgorszy z 8 narożników"),
             ("dice", "Dice obrysu znacznika", _f(zg['obrys']['dice'], 3), "pokrycie obrysów (1 = idealne)"),
@@ -264,22 +263,22 @@ def sekcje(w):
         ("px_t", "Znamię na termowizji", f"{_f(ks['piksele_znamienia_termal'], 1)} px", f"= {_f(ks['pole_znamienia_termal_mm2'])} mm²"),
         ("px_t", "Rozmiar piksela termowizji", f"{_f(ks['mm_na_px_termal'], 3)} mm", "bok jednego piksela kamery na skórze"),
     ]
-    if zr.get("narozniki_klucz") == "cvat":
-        wiersze.append(("rms", "RMS narożników (zdjęcie / termowizja)", f"{_f(nar.get('rgb_rms_mm'))} / {_f(nar.get('termal_rms_mm'))} mm",
-                        "dopasowanie adnotacji do wzorca 35 × 26 mm"))
-    else:
-        wiersze.append(("rms", "IoU wzorca (zdjęcie / termowizja)", f"{_f(nar.get('rgb_iou_wzorca'), 3)} / {_f(nar.get('termal_iou_wzorca'), 3)}",
-                        "pokrycie maski znacznika przez dopasowany kształt Π"))
+    wiersze.append(("rms", "IoU wzorca (zdjęcie / termowizja)", f"{_f(nar.get('rgb_iou_wzorca'), 3)} / {_f(nar.get('termal_iou_wzorca'), 3)}",
+                    "pokrycie maski znacznika przez dopasowany kształt Π"))
+    if nar.get("rgb_blad_vs_cvat_mm") is not None:
+        wiersze.append(("rms", "Narożniki na zdjęciu: błąd względem CVAT", f"{_f(nar['rgb_blad_vs_cvat_mm'])} mm",
+                        "średnia odległość od narożników oznaczonych ręcznie"))
     wynik.append(("Kontrola skali i rozdzielczości", None, wiersze))
     seg = w.get("segmentacja_vs_cvat")
     if seg:
-        wynik.append((f"Segmentacja znamienia ({zr['znamie']}) a adnotacja z CVAT", None, [
+        wynik.append(("Segmentacja znamienia: PanDerm a adnotacja z CVAT", None, [
+            ("seg", "Pole: PanDerm / CVAT", f"{_f(rgb['pole_mm2'])} / {_f(seg.get('pole_cvat_mm2'))} mm²", "ta sama skala z narożników automatycznych"),
             ("seg", "Dice", _f(seg['dice'], 3), "pokrycie masek znamienia"),
             ("iou", "IoU", _f(seg['iou'], 3), ""),
             ("hd95", "HD95", f"{_f(seg.get('hd95_mm'))} mm", "kontury w najgorszych miejscach"),
             ("assd", "ASSD", f"{_f(seg.get('assd_mm'))} mm", "średnia odległość konturów"),
             ("srodki", "Przesunięcie środków", f"{_f(seg.get('przesuniecie_srodkow_mm'))} mm", ""),
-            ("pola", "Stosunek pól", _f(seg['stosunek_pol'], 3), "segmentacja / adnotacja"),
+            ("pola", "Stosunek pól", _f(seg['stosunek_pol'], 3), "PanDerm / adnotacja; > 1 = PanDerm zawyża"),
         ]))
     wynik.append(("Znamię na zdjęciu RGB", f"Znamię: {zr['znamie']}; skala z narożników: {zr['narozniki']}.", [
         ("pole", "Pole", f"{_f(rgb['pole_mm2'])} mm²", "liczba pikseli maski × lokalna skala²"),
@@ -293,11 +292,6 @@ def sekcje(w):
         ("de", "ΔE (znamię – skóra)", _f(rgb['delta_e'], 1), "różnica koloru; > 10 = wyraźna"),
         ("skala", "Skala", f"{_f(rgb['mm_na_px'], 4)} mm/px", "rozmiar piksela zdjęcia w miejscu znamienia"),
     ]))
-    obszary = w.get("obszary_z_termowizji") or []
-    if obszary:
-        wynik.append(("Obszary zaznaczone na termowizji (przeniesione na zdjęcie)", None,
-                      [("obszar_t", f"Obszar {o['nr']}", f"{_f(o.get('pole_rgb_mm2'))} / {_f(o.get('pole_termal_mm2'))} mm²",
-                        "pole na zdjęciu / na termowizji") for o in obszary]))
     return wynik
 
 
@@ -339,28 +333,29 @@ def zapisz(sciezka, w, obrazy):
 <li><b>Wejście</b>: zdjęcie z telefonu i obraz termowizyjny{' z <code>dane/pary/' + str(para) + '/</code>' if para is not None else ''};
  {'adnotacje z CVAT dostępne (wzorzec do oceny)' if zg else 'bez adnotacji z CVAT'}.</li>
 <li><b>Rejestracja</b> (<code>dopasowanie3.py</code>): znacznik wykryty automatycznie w obu obrazach (metoda klasyczna,
- bez adnotacji), dopasowanie kształtów → macierz T (piksel zdjęcia → piksel termowizji).</li>
+ kandydat wybierany po podobieństwie do wzorca Π, bez adnotacji), dopasowanie kształtów → macierz T
+ (piksel zdjęcia → piksel termowizji).</li>
 <li><b>Segmentacja</b>: narożniki znacznika – {e(zr['narozniki'])}, z nich skala w mm (homografia do wymiarów
  35 × 26 mm); znamię – {e(zr['znamie'])}.</li>
 <li><b>Przeniesienie ROI</b>: obrys znamienia, obrys i otwór znacznika oraz 8 narożników ze zdjęcia na termowizję
- (przez T){'; obszary zaznaczone na termowizji na zdjęcie (przez T⁻¹)' if w.get('obszary_z_termowizji') else ''}.</li>
+ (przez T).</li>
 <li><b>Pomiary i zgodność</b>: wymiary i kolor znamienia w mm; kontrola skali (pole otworu
  znacznika){'; porównanie z wzorcem z CVAT (badanie E1)' if zg else ''}.</li>
 <li><b>Raport</b>: ten plik, <code>metryki.json</code> i obrazy PNG w {folder_wynikow}.</li></ol>""")
 
     fiolet = "oznaczony w CVAT" if zg else "wykryty automatycznie"
-    niebieskie = ", obszary zaznaczone na termowizji (niebieskie)" if w.get("obszary_z_termowizji") else ""
+    niebieskie = ", znamię z CVAT do porównania (niebieskie)" if w.get("segmentacja_vs_cvat") else ""
     czesci.append("<h2>Obrazy</h2><div class='siatka'>"
-                  + _img(obrazy["rgb"], f"Zdjęcie: znacznik i narożniki 0–7 (zielone), znamię (czerwone), pierścień skóry "
+                  + _img(obrazy["rgb"], f"Zdjęcie: znacznik i narożniki 0–7 (zielone), znamię z PanDerm (czerwone), pierścień skóry "
                                         f"{r0}–{r1} mm do porównania koloru (żółty){niebieskie}")
                   + _img(obrazy["termal"], f"Termowizja (3×): znacznik {fiolet} na termowizji (fioletowy); przeniesione ze "
                                            f"zdjęcia: znacznik (zielony) i znamię (czerwone)"
-                                           + ("; białe kreski = błąd narożników" if zg else "") + niebieskie)
+                                           + ("; białe kreski = błąd rejestracji w narożnikach (CVAT)" if zg else ""))
                   + "</div><div class='siatka'>"
                   + _img(obrazy["nakladka"], f"Nałożenie: termowizja przeniesiona na zdjęcie (50%). Znacznik ze zdjęcia (zielony), "
                                              f"znacznik {fiolet} na termowizji przeniesiony przez T⁻¹ (fioletowy), znamię (czerwone)")
-                  + _img(obrazy["nakladka_zblizenie"], f"Nałożenie w powiększeniu wokół znamienia (czerwone). Termowizja bez "
-                                                       f"wygładzania: każdy kwadrat to jeden piksel kamery "
+                  + _img(obrazy["nakladka_zblizenie"], f"Nałożenie w powiększeniu wokół znamienia (czerwone){niebieskie}. "
+                                                       f"Termowizja bez wygładzania: każdy kwadrat to jeden piksel kamery "
                                                        f"(ok. {_f(ks['mm_na_px_termal'])} mm)")
                   + "</div>")
 

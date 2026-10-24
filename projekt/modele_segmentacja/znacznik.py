@@ -3,10 +3,8 @@ Obszar analizy z wnetrza znacznika ㄇ (Π) na zdjeciu RGB - bez obrazu termalne
 
 Znamie lezy miedzy ramionami znacznika, wiec model segmentacji dostaje tylko
 wnetrze znacznika, a nie cale zdjecie:
-  1. Folia: te same kryteria co w dopasowanie3.py (niskie nasycenie barwy,
-     odleglosc od koloru skory), dodatkowo z warunkiem jasnosci (oddziela folie
-     od ciemnych wlosow). Ksztalt kandydata porownywany jest z syntetycznym
-     szablonem ㄇ (max IoU po obrocie) zamiast z maska z termowizji.
+  1. Folia: ta sama detekcja co w rejestracji (dopasowanie3.wykryj_folie_rgb: barwa chlodniejsza
+     od skory i tekstura, wybor kandydata po podobienstwie do wzorca Π 35 x 26 mm, pasek 10 mm).
   2. Wnetrze = otoczka wypukla folii minus folia (otwor miedzy ramionami).
   3. Obszar = wnetrze poszerzone o margines (znamie moze wystawac za linie
      konca ramion), bez folii. ROI = prostokat obejmujacy obszar.
@@ -34,18 +32,7 @@ except ImportError:                                   # uruchomienie spoza folde
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     import dopasowanie3 as _d
 
-DET_PX = 800            # dluzszy bok obrazu roboczego (detekcja); ROI nie wymaga pelnej rozdzielczosci
-
-# Ksztalt znacznika: belka o dlugosci 1, ramiona o dlugosci GLEBOKOSC, pasek tasmy o szerokosci PASEK.
-# Zmierzone na 5 zdjeciach z 17.10.2026 (dopasowanie szablonu: IoU ksztaltu 0,91-0,95).
-GLEBOKOSC = 0.70
-PASEK = 0.24
-
-MIN_ZGODNOSC = 0.70            # IoU z szablonem: znaczniki 0,91-0,95, inne obiekty na zdjeciach <= 0,55
-MIN_ZGODNOSC_POD_KATEM = 0.58  # zdjecie mocno pod katem (perspektywa) obniza IoU do ~0,64-0,75 -
-UDZIAL_TYPOWY = (0.22, 0.48)   # wtedy wystarczy nizsza zgodnosc, jesli otwor ma typowy udzial
 UDZIAL_WNETRZA = (0.15, 0.60)  # pole otworu / pole otoczki wypuklej (dla ksztaltu wyzej: 0,34)
-MIN_POLE_ZNACZNIKA = 0.02      # otoczka wypukla znacznika / pole zdjecia (na zdjeciach z 17.10: 0,4-0,55)
 MARGINES = 0.08                # poszerzenie otworu, ulamek sqrt(pola otworu)
 
 
@@ -66,48 +53,6 @@ class Znacznik:
 
 
 # ── detekcja ─────────────────────────────────────────────────────────────────
-
-def szablon(rozmiar=200, glebokosc=GLEBOKOSC, pasek=PASEK):
-    """Syntetyczna maska ㄇ: belka u gory, ramiona w dol."""
-    W, H, t = rozmiar, int(round(rozmiar * glebokosc)), int(round(rozmiar * pasek))
-    m = np.zeros((H + 20, W + 20), np.uint8)
-    m[10:10 + t, 10:10 + W] = 255
-    m[10:10 + H, 10:10 + t] = 255
-    m[10:10 + H, 10 + W - t:10 + W] = 255
-    return m
-
-
-def _najlepszy_ksztalt(im, wzor):
-    """(zgodnosc, opis, maska) najlepszego kandydata na folie w obrazie roboczym albo None."""
-    H, W = im.shape[:2]
-    k = _d._kolo(max(2, min(H, W) // 200))
-    min_pole = 0.0007 * H * W
-    lab = cv2.cvtColor(im, cv2.COLOR_BGR2LAB).astype(np.float32)
-    C = cv2.GaussianBlur(np.hypot(lab[..., 1] - 128, lab[..., 2] - 128), (0, 0), 1.5)
-    L = cv2.GaussianBlur(lab[..., 0], (0, 0), 1.5)
-    c_skora = float(np.percentile(C, 90))
-    progi_L = {q: float(np.percentile(L, q)) for q in (35, 60)}
-
-    najl = None
-    # przebieg 1: folia = niskie nasycenie barwy; z warunkiem jasnosci oddziela sie od ciemnych
-    # wlosow (tez maja niskie nasycenie i zlewaja sie z folia w plame dotykajaca brzegu zdjecia)
-    for f in (0.15, 0.22, 0.30, 0.38, 0.46, 0.55, 0.65):
-        niskie = C < f * c_skora
-        warianty = [(niskie, f"chroma < {f:.2f}*skora")]
-        warianty += [(niskie & (L > l), f"chroma < {f:.2f}*skora, L > p{q}") for q, l in progi_L.items()]
-        for b, opis in warianty:
-            najl = _d._najlepszy_kandydat(_d._skladowe(b.astype(np.uint8) * 255, k, min_pole),
-                                          wzor, False, najl, opis)
-    if najl is None:
-        return None
-    # przebieg 2: wszystko, co odbiega od koloru skory wokol najlepszego kandydata
-    # (lustrzana folia odbijajaca biel albo skore)
-    D, roi = _d.odleglosc_od_skory(im, najl[2])
-    for t in (2.5, 3.5, 5.0, 7.0):
-        najl = _d._najlepszy_kandydat(_d._skladowe((D > t).astype(np.uint8) * 255, k, min_pole, roi),
-                                      wzor, False, najl, f"odl. od skory > {t}")
-    return najl
-
 
 def _odstep_od_folii(maska):
     """Pas przy krawedzi folii pomijany w obszarze (ciemny brzeg tasmy i jej cien), w px maski."""
@@ -168,27 +113,19 @@ def _podpowiedz(im):
     return ""
 
 
-def wykryj_znacznik(obraz_bgr, min_zgodnosc=MIN_ZGODNOSC):
-    """Znacznik ㄇ na zdjeciu RGB (BGR, uint8). Wyjatek BrakZnacznika, gdy go nie ma."""
+def wykryj_znacznik(obraz_bgr, min_zgodnosc=None):
+    """Znacznik Π na zdjeciu RGB (BGR, uint8) - ta sama detekcja co w rejestracji
+    (dopasowanie3.wykryj_folie_rgb). Wyjatek BrakZnacznika, gdy go nie ma."""
     t0 = time.perf_counter()
-    H0, W0 = obraz_bgr.shape[:2]
-    sc = min(1.0, DET_PX / max(H0, W0))
-    im = cv2.resize(obraz_bgr, (int(round(W0 * sc)), int(round(H0 * sc))), interpolation=cv2.INTER_AREA)
-    najl = _najlepszy_ksztalt(im, szablon())
-    if najl is None:
-        raise BrakZnacznika("brak kandydatow na folie (jasne, szare obszary)." + _podpowiedz(im))
-    zgodnosc, opis, maska = najl
-    if zgodnosc < min(min_zgodnosc, MIN_ZGODNOSC_POD_KATEM):
-        raise BrakZnacznika(f"najbardziej podobny obiekt ma zgodnosc ksztaltu z Pi {zgodnosc:.2f} "
-                            f"(potrzeba >= {min_zgodnosc:.2f})." + _podpowiedz(im))
-    udzial_otoczki = cv2.contourArea(cv2.convexHull(cv2.findNonZero(maska))) / (im.shape[0] * im.shape[1])
-    if udzial_otoczki < MIN_POLE_ZNACZNIKA:
-        raise BrakZnacznika(f"najbardziej podobny obiekt jest za maly ({100 * udzial_otoczki:.1f}% zdjecia) "
-                            f"- to raczej nie znacznik.")
-    z = znacznik_z_maski(maska, (H0, W0), sc, zgodnosc, opis)
-    if zgodnosc < min_zgodnosc and not UDZIAL_TYPOWY[0] <= z.udzial_wnetrza <= UDZIAL_TYPOWY[1]:
-        raise BrakZnacznika(f"najbardziej podobny obiekt ma zgodnosc ksztaltu z Pi {zgodnosc:.2f} "
-                            f"i nietypowe wnetrze ({z.udzial_wnetrza:.2f}).")
+    min_zgodnosc = _d.MIN_ZGODNOSC if min_zgodnosc is None else min_zgodnosc
+    try:
+        w = _d.wykryj_folie_rgb(obraz_bgr)
+    except RuntimeError as e:
+        raise BrakZnacznika(str(e) + "." + _podpowiedz(obraz_bgr)) from None
+    if w["zgodnosc"] < min_zgodnosc:
+        raise BrakZnacznika(f"najbardziej podobny obiekt ma zgodnosc ksztaltu z Pi {w['zgodnosc']:.2f} "
+                            f"(potrzeba >= {min_zgodnosc:.2f})." + _podpowiedz(w["im"]))
+    z = znacznik_z_maski(w["maska"], obraz_bgr.shape[:2], w["sc"], w["zgodnosc"], w["opis"])
     z.czas_s = time.perf_counter() - t0
     return z
 

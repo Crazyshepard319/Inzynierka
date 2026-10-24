@@ -2,14 +2,14 @@
 Rejestracja multimodalna: RGB <-> termal (wersja 3)
 Eksportuje: run_registration(rgb_path, ter_path, out_path, model=MODEL)
 
-Idea: transformacje wyznacza sam znacznik (folia), a nie cala scena.
-  1. Termal: znacznik = najciemniejszy obiekt otoczony cieplejsza skora,
-     krawedz z lokalnego progu (polowa drogi miedzy folia a skora).
-  2. RGB: kandydaci = obszary o niskim nasyceniu barwy (chroma w Lab) oraz
-     obszary odbiegajace od lokalnego koloru skory (lustrzana folia odbija
-     biel lub skore). Wybierany jest kandydat najbardziej podobny KSZTALTEM
-     do znacznika z termalu (max IoU po obrocie) - nie zalezy od tego,
-     czy znacznik jest kolem, pierscieniem, litera C czy ksztaltem "Pi".
+Idea: transformacje wyznacza sam znacznik Π (folia 35 x 26 mm, pasek 10 mm), a nie cala scena.
+  1. Termal: kandydaci = obszary ciemniejsze od skory albo teksturowane (odbicia w folii); wybierany
+     jest najbardziej podobny ksztaltem do wzorca Π; krawedz z lokalnego progu (polowa drogi
+     miedzy folia a skora).
+  2. RGB: kandydaci = obszary chlodniejsze w barwie od skory (a* + b* w Lab) i/lub teksturowane
+     (zalamania folii), po zamknieciu i otwarciu roznej wielkosci; wybierany jest najbardziej podobny
+     ksztaltem do wzorca Π; krawedz poprawia GrabCut. Na 94 parach z 23.10 maska zgadza sie z
+     adnotacja z CVAT na ~90 parach (IoU >= 0,85); zgodnosc z wzorcem < 0,65 = ostrzezenie.
   3. Wstepne podobienstwo (srodek masy, skala z pol, kat z przeszukania 360 st.).
   4. Doprecyzowanie ECC (cv2.findTransformECC) na maskach znacznikow:
      afiniczna, opcjonalnie homografia (tylko gdy jest stabilna).
@@ -22,6 +22,9 @@ from pathlib import Path
 
 RGB_DET_PX = 1000     # dluzszy bok obrazu RGB, na ktorym odbywa sie detekcja i dopasowanie
 MODEL = 'auto'        # 'afiniczna' | 'homografia' | 'auto' (homografia tylko gdy stabilna)
+# Odbicie lustrzane termowizji: znacznik Π jest symetryczny wzgledem osi, wiec odbicie pasuje rownie dobrze
+# i zamienia ramiona miejscami (blad ~25 mm na parach 10, 55, 72). Kamera nie odwraca obrazu - wylaczone.
+SPRAWDZ_LUSTRO = False
 
 
 # ── Funkcje pomocnicze ───────────────────────────────────────────────────────
@@ -123,6 +126,42 @@ def krzywa_iou(ref, mov, katy, sz=128):
     return out
 
 
+# ── Wzorzec znacznika ────────────────────────────────────────────────────────
+# Znacznik Π z folii: belka 35 mm, ramiona 26 mm, pasek 10 mm; narozniki w tej samej kolejnosci
+# co w import_cvat.py. Kandydat na znacznik jest wybierany wedlug podobienstwa ksztaltu do tego wzorca
+# (osobno w kazdej modalnosci - blad detekcji w jednej nie psuje drugiej).
+BELKA, RAMIE, PASEK = 35.0, 26.0, 10.0
+WZORZEC_MM = np.array([[0, 0], [BELKA, 0], [BELKA, RAMIE], [BELKA - PASEK, RAMIE], [BELKA - PASEK, PASEK],
+                       [PASEK, PASEK], [PASEK, RAMIE], [0, RAMIE]], np.float64)
+MIN_ZGODNOSC = 0.65   # IoU ksztaltu z wzorcem; ponizej detekcja jest niepewna (na 94 parach poprawne >= 0,68)
+_KATY = np.arange(0, 360, 4)
+
+
+def maska_wzorca(px_na_mm=4.0):
+    """Maska wzorca Π (uint8 0/255) w skali px_na_mm, z marginesem 5 mm."""
+    m = int(round(5 * px_na_mm))
+    t = np.zeros((int(RAMIE * px_na_mm) + 2 * m, int(BELKA * px_na_mm) + 2 * m), np.uint8)
+    cv2.fillPoly(t, [np.round((WZORZEC_MM * px_na_mm + m) * 16).astype(np.int32)], 255, cv2.LINE_8, 4)
+    return t
+
+
+_WZORZEC = maska_wzorca()
+
+
+def zgodnosc_z_wzorcem(maska):
+    """IoU ksztaltu maski z wzorcem Π po najlepszym obrocie (srodki mas i pola wyrownane)."""
+    return float(krzywa_iou(_WZORZEC, maska, _KATY, sz=96).max())
+
+
+def _najlepszy(kandydaci, najl=None):
+    """kandydaci: (maska, opis); zwraca (zgodnosc z wzorcem, opis, maska) najlepszego."""
+    for m, opis in kandydaci:
+        z = zgodnosc_z_wzorcem(m)
+        if najl is None or z > najl[0]:
+            najl = (z, opis, m)
+    return najl
+
+
 # ── Detekcja: termal ─────────────────────────────────────────────────────────
 
 def wczytaj_termal(sciezka):
@@ -140,176 +179,179 @@ def wczytaj_termal(sciezka):
     return g, kolor
 
 
+def _kandydaci_termal(binarna, min_pole, opis):
+    m = cv2.morphologyEx(binarna.astype(np.uint8) * 255, cv2.MORPH_OPEN, _kolo(2))
+    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, _kolo(2), iterations=2)
+    n, lab, st, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+    return [(wypelnij_dziury((lab == j).astype(np.uint8) * 255, 0.03), opis)
+            for j in range(1, n) if st[j, cv2.CC_STAT_AREA] >= min_pole]
+
+
 def wykryj_znacznik_termal(sciezka):
     """
-    Znacznik = ciemny obiekt (folia odbija zimne otoczenie) otoczony skora.
-    Zwraca dict: maska (uint8), miekka (float 0..1, 1 = znacznik, krawedz
-    subpikselowa z intensywnosci), kolor (obraz BGR), info.
+    Znacznik na termowizji. Folia odbija otoczenie: jest ciemniejsza od skory (zimne odbicia) albo
+    ma silna teksture (cieple i zimne odbicia obok siebie), a skora jest gladka. Kandydaci:
+    "ciemne" oraz "ciemne lub teksturowane" przy kilku progach; wybierany jest kandydat najbardziej
+    podobny ksztaltem do wzorca Π. Krawedz rozmyta przez optyke: w pasie +-4 px prog w pol drogi
+    miedzy folia przy krawedzi a skora wokol.
+    Zwraca dict: maska (uint8), miekka (float 0..1, krawedz subpikselowa z intensywnosci),
+    kolor (obraz BGR), zgodnosc (IoU ksztaltu z wzorcem).
     """
     g, kolor = wczytaj_termal(sciezka)
     H, W = g.shape
     gb = cv2.GaussianBlur(g, (0, 0), 1.0)
-    u8 = np.clip(gb, 0, 255).astype(np.uint8)
-    otsu, _ = cv2.threshold(u8, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-
-    # Kilka progow: Otsu oraz nizsze - gdy znacznik dotyka zimnego tla (krawedz
-    # reki), przy progu Otsu zlewa sie z nim w jedna plame; folia jest zwykle
-    # "zimniejsza" niz tlo, wiec przy nizszym progu sie rozdzielaja.
-    # Ocena skladowej: kontrast do otoczenia, otoczenie jasnym, nie przy brzegu.
-    k9 = _kolo(4)
-    v_min = float(np.percentile(gb, 0.5))
-    progi = [otsu] + [v_min + f * (otsu - v_min) for f in (0.8, 0.6, 0.45, 0.3)]
-    najl, najl_ocena = None, -1.0
-    for t in progi:
-        ciemne = (u8 < t).astype(np.uint8) * 255
-        n, lab, st, _ = cv2.connectedComponentsWithStats(ciemne, connectivity=8)
-        for j in range(1, n):
-            x, y, w, h, a = st[j]
-            if a < 0.0005 * H * W:
-                continue
-            sk = (lab == j).astype(np.uint8) * 255
-            obwod = cv2.subtract(cv2.dilate(sk, k9), sk)
-            jasne = cv2.bitwise_and(obwod, cv2.bitwise_not(ciemne))
-            if cv2.countNonZero(jasne) == 0:
-                continue
-            otoczenie = cv2.countNonZero(jasne) / max(1, cv2.countNonZero(obwod))
-            kontrast = gb[jasne > 0].mean() - gb[sk > 0].mean()
-            przy_brzegu = x == 0 or y == 0 or x + w == W or y + h == H
-            ocena = kontrast * otoczenie**2 * np.sqrt(a) * (0.1 if przy_brzegu else 1.0)
-            if ocena > najl_ocena:
-                najl_ocena, najl = ocena, sk
+    mu = cv2.blur(gb, (5, 5))
+    sd = np.sqrt(np.maximum(cv2.blur(gb * gb, (5, 5)) - mu * mu, 0))
+    skora = float(np.percentile(gb, 70))
+    min_pole = 0.003 * H * W
+    najl = None
+    for fd in (0.5, 0.65, 0.8):
+        ciemne = gb < fd * skora
+        najl = _najlepszy(_kandydaci_termal(ciemne, min_pole, f"ciemne < {fd} skory"), najl)
+        for ts in (6, 10, 15):
+            najl = _najlepszy(_kandydaci_termal(ciemne | (sd > ts), min_pole,
+                                                f"ciemne < {fd} skory lub tekstura > {ts}"), najl)
     if najl is None:
         raise RuntimeError("[termal] Nie znaleziono znacznika")
-    sk = najl
+    zgodnosc, opis, sk = najl
 
-    # lokalny prog: polowa drogi miedzy wnetrzem znacznika a skora wokol;
-    # krawedz moze przesunac sie najwyzej o 3 px (nie "wycieka" w zimne tlo)
-    pierscien = cv2.subtract(cv2.dilate(sk, k9, iterations=3), cv2.dilate(sk, k9))
-    wnetrze = cv2.erode(sk, _kolo(2))
-    if cv2.countNonZero(wnetrze) < 20:
-        wnetrze = sk
-    v_in = float(np.median(gb[wnetrze > 0]))
-    v_out = float(np.median(gb[pierscien > 0]))
+    # krawedz: wnetrze kandydata (bez pasa 4 px) + piksele pasa ciemniejsze niz polowa drogi folia-skora
+    r = 4
+    wn = cv2.erode(sk, _kolo(r))
+    zew = cv2.subtract(cv2.dilate(sk, _kolo(r + 3)), cv2.dilate(sk, _kolo(r)))
+    pas = cv2.subtract(cv2.dilate(sk, _kolo(r)), wn) > 0
+    brzeg_wn = cv2.subtract(wn, cv2.erode(wn, _kolo(2))) > 0
+    v_out = float(np.median(gb[zew > 0]))
+    v_in = float(np.percentile(gb[brzeg_wn], 30)) if brzeg_wn.any() else float(np.median(gb[sk > 0]))
     prog = 0.5 * (v_in + v_out)
-    lok = cv2.bitwise_and((gb < prog).astype(np.uint8) * 255, cv2.dilate(sk, _kolo(3)))
-    _, lab2 = cv2.connectedComponents(lok, connectivity=8)
-    ids, cnt = np.unique(lab2[(sk > 0) & (lok > 0)], return_counts=True)
-    cnt, ids = cnt[ids > 0], ids[ids > 0]
-    maska = (lab2 == ids[np.argmax(cnt)]).astype(np.uint8) * 255 if len(ids) else sk
-    maska = wypelnij_dziury(maska, 0.03)       # odblaski wewnatrz folii
+    m = ((wn > 0) | (pas & (gb < prog))).astype(np.uint8) * 255
+    n, lab, st, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+    if n > 1:
+        m = (lab == 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA]))).astype(np.uint8) * 255
+    maska = wypelnij_dziury(m, 0.05)
 
     # miekka maska: w pasie +-2 px wokol krawedzi wartosc z intensywnosci
     miekka = np.clip((v_out - g) / max(1e-3, v_out - v_in), 0, 1)
-    pas = cv2.subtract(cv2.dilate(maska, _kolo(2)), cv2.erode(maska, _kolo(2))) > 0
-    miekka = np.where(pas, miekka, (maska > 0)).astype(np.float32)
+    pas2 = cv2.subtract(cv2.dilate(maska, _kolo(2)), cv2.erode(maska, _kolo(2))) > 0
+    miekka = np.where(pas2, miekka, (maska > 0)).astype(np.float32)
 
     c, pole = srodek_pole(maska)
     print(f"  [termal] srodek=({c[0]:.1f},{c[1]:.1f})  promien rown.={np.sqrt(pole/np.pi):.1f}px  "
-          f"prog={prog:.0f} (folia {v_in:.0f} / skora {v_out:.0f})  obraz={W}x{H}")
-    return dict(maska=maska, miekka=miekka, kolor=kolor)
+          f"zgodnosc z wzorcem Pi={zgodnosc:.3f}  kryterium: {opis}  prog krawedzi={prog:.0f} "
+          f"(folia {v_in:.0f} / skora {v_out:.0f})  obraz={W}x{H}")
+    if zgodnosc < MIN_ZGODNOSC:
+        print("  OSTRZEZENIE [termal] znacznik wykryty niepewnie - sprawdz _debug_termal.png")
+    return dict(maska=maska, miekka=miekka, kolor=kolor, zgodnosc=zgodnosc)
 
 
 # ── Detekcja: RGB ────────────────────────────────────────────────────────────
 
-def _skladowe(binarna, k, min_pole, roi=None):
-    m = cv2.morphologyEx(binarna, cv2.MORPH_OPEN, k)
-    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, k, iterations=2)
-    if roi is not None:
-        m = cv2.bitwise_and(m, roi)
-    H, W = m.shape
-    n, lab, st, cen = cv2.connectedComponentsWithStats(m, connectivity=8)
+def _kandydaci_rgb(binarna, k_r, min_pole, opis):
+    """Skladowe po zamknieciu (sklejenie przerw i zalaman folii) i otwarciu roznej wielkosci
+    (odciecie wlosow i waskich polaczen z tlem); bez skladowych dotykajacych brzegu zdjecia."""
     out = []
-    for j in range(1, n):
-        x, y, w, h, a = st[j]
-        if a < min_pole or x == 0 or y == 0 or x + w == W or y + h == H:
-            continue
-        out.append(((lab == j).astype(np.uint8) * 255, st[j], cen[j]))
+    H, W = binarna.shape
+    b = binarna.astype(np.uint8) * 255
+    for rc, ro in ((1, 1), (2, 2), (2, 4), (3, 7)):
+        m = cv2.morphologyEx(b, cv2.MORPH_CLOSE, _kolo(rc * k_r))
+        m = cv2.morphologyEx(m, cv2.MORPH_OPEN, _kolo(ro * k_r))
+        n, lab, st, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+        for j in range(1, n):
+            x, y, w, h, a = st[j]
+            if a < min_pole or x == 0 or y == 0 or x + w == W or y + h == H:
+                continue
+            out.append((wypelnij_dziury((lab == j).astype(np.uint8) * 255, 0.03), f"{opis}, morfologia {rc}/{ro}"))
     return out
 
 
-def _najlepszy_kandydat(kand, maska_ter, ma_dziure, najl, opis):
-    """Ocena kandydatow (pojedyncze skladowe i pary bliskich skladowych - znacznik
-    bywa przeciety odblaskiem) przez podobienstwo ksztaltu do znacznika z termalu."""
-    katy = np.arange(0, 360, 4)
-    opcje = [[i] for i in range(len(kand))]
-    for i in range(len(kand)):
-        for j in range(i + 1, len(kand)):
-            si, sj = kand[i][1], kand[j][1]
-            d = np.hypot(*(kand[i][2] - kand[j][2]))
-            if d < 0.6 * (max(si[2], si[3]) + max(sj[2], sj[3])):
-                opcje.append([i, j])
-    for o in opcje:
-        m = kand[o[0]][0]
-        for i in o[1:]:
-            m = cv2.bitwise_or(m, kand[i][0])
-        m = wypelnij_dziury(m, 0.03 if ma_dziure else 1e9)
-        ocena = krzywa_iou(maska_ter, m, katy, sz=96).max() - 0.02 * (len(o) - 1)
-        if najl is None or ocena > najl[0]:
-            najl = (ocena, opis, m)
-    return najl
+def _grabcut(im, m, powieksz=0.5, iteracje=4):
+    """Krawedz folii metoda GrabCut: kolory folii z kandydata, skory z jego otoczenia
+    (liczone tylko w prostokacie wokol kandydata)."""
+    r = max(5, int(powieksz * np.sqrt(cv2.countNonZero(m))))
+    obszar = cv2.dilate(m, _kolo(r))
+    x, y, w, h = cv2.boundingRect(obszar)
+    x0, y0 = max(0, x - 2), max(0, y - 2)
+    x1, y1 = min(m.shape[1], x + w + 2), min(m.shape[0], y + h + 2)
+    gc = np.full((y1 - y0, x1 - x0), cv2.GC_BGD, np.uint8)
+    gc[obszar[y0:y1, x0:x1] > 0] = cv2.GC_PR_BGD
+    gc[m[y0:y1, x0:x1] > 0] = cv2.GC_PR_FGD
+    bg, fg = np.zeros((1, 65), np.float64), np.zeros((1, 65), np.float64)
+    try:
+        cv2.grabCut(np.ascontiguousarray(im[y0:y1, x0:x1]), gc, None, bg, fg, iteracje, cv2.GC_INIT_WITH_MASK)
+    except cv2.error:
+        return None
+    w_ = ((gc == cv2.GC_FGD) | (gc == cv2.GC_PR_FGD)).astype(np.uint8) * 255
+    n, lab, st, _ = cv2.connectedComponentsWithStats(w_, connectivity=8)
+    if n < 2:
+        return None
+    wynik = np.zeros_like(m)
+    wynik[y0:y1, x0:x1] = (lab == 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA]))).astype(np.uint8) * 255
+    return wypelnij_dziury(wynik, 0.03)
 
 
-def odleglosc_od_skory(im, maska):
-    """Odleglosc Mahalanobisa (Lab) od koloru skory zmierzonego wokol znacznika.
-    Zwraca mape odleglosci i ROI (otoczenie znacznika)."""
-    _, pole = srodek_pole(maska)
-    r = np.sqrt(pole / np.pi)
-    lab = cv2.cvtColor(cv2.GaussianBlur(im, (0, 0), 1.0), cv2.COLOR_BGR2LAB).astype(np.float32)
-    pelna = wypelnij_dziury(maska, 1e9)
-    probka = cv2.subtract(cv2.dilate(pelna, _kolo(0.45*r)), cv2.dilate(pelna, _kolo(0.12*r))) > 0
-    dziura = cv2.subtract(pelna, cv2.dilate(maska, _kolo(0.08*r))) > 0   # np. srodek pierscienia
-    smp = lab[probka | dziura].reshape(-1, 3)
-    mu = np.median(smp, 0)
-    d0 = np.linalg.norm((smp - mu) / (smp.std(0) + 1e-3), axis=1)
-    smp = smp[d0 < np.percentile(d0, 80)]          # odrzuc tlo, paznokcie, cienie
-    cov = np.cov(smp.T) + np.diag([4.0, 1.0, 1.0])
-    d = lab.reshape(-1, 3) - smp.mean(0)
-    D = np.sqrt(np.einsum('ij,jk,ik->i', d, np.linalg.inv(cov), d))
-    return D.reshape(lab.shape[:2]), cv2.dilate(pelna, _kolo(0.6*r))
-
-
-def wykryj_znacznik_rgb(sciezka, maska_ter):
+def wykryj_folie_rgb(img):
     """
-    Zwraca dict: maska (w skali roboczej), sc (skala robocza), obraz (oryginal), opis.
+    Folia znacznika na zdjeciu (BGR). Folia jest chlodniejsza w barwie od skory (mniej czerwieni
+    i zolci: a* + b* w Lab, wzgledem mediany skory na tym zdjeciu) i ma teksture (zalamania).
+    Kandydaci z trzech map: chlod barwy, tekstura, chlod i tekstura w poblizu, przy kilku progach;
+    wybierany jest kandydat najbardziej podobny ksztaltem do wzorca Π. Krawedz poprawia GrabCut,
+    jesli nie psuje ksztaltu.
+    Zwraca dict: maska (skala robocza), sc (skala robocza), im (obraz roboczy), zgodnosc, opis.
+    """
+    H0, W0 = img.shape[:2]
+    sc = min(1.0, RGB_DET_PX / max(H0, W0))
+    im = cv2.resize(img, (int(round(W0 * sc)), int(round(H0 * sc))), interpolation=cv2.INTER_AREA)
+    H, W = im.shape[:2]
+    k_r = max(2, min(H, W) // 250)
+    min_pole = 0.01 * H * W
+    lab = cv2.cvtColor(cv2.GaussianBlur(im, (0, 0), 1.5), cv2.COLOR_BGR2LAB).astype(np.float32)
+    L, cieplo = lab[..., 0], (lab[..., 1] - 128) + (lab[..., 2] - 128)
+    jasne = L > np.percentile(L, 20)                       # bez wlosow i cieni
+    c_sk = float(np.median(cieplo[jasne]))
+    chlod = (c_sk - cieplo) / (float(np.percentile(np.abs(cieplo[jasne] - c_sk), 50)) + 1.0)
+    g = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    mu = cv2.blur(g, (7, 7))
+    sd = np.sqrt(np.maximum(cv2.blur(g * g, (7, 7)) - mu * mu, 0))
+    sd_sk = float(np.median(sd))
+    sd_blisko = cv2.dilate(sd, _kolo(4 * k_r))             # gladkie plamy folii tez lezą blisko zalaman
+    najl = None
+    for t in (1.5, 2.0, 3.0, 4.0, 5.5, 7.5):
+        najl = _najlepszy(_kandydaci_rgb(chlod > t, k_r, min_pole, f"chlodniejsze od skory > {t}"), najl)
+    for f in (2.0, 3.0, 4.5):
+        najl = _najlepszy(_kandydaci_rgb(sd > f * sd_sk, k_r, min_pole, f"tekstura > {f} x mediana"), najl)
+    for t in (1.0, 1.5, 2.0, 3.0):
+        for f in (1.5, 2.5):
+            najl = _najlepszy(_kandydaci_rgb((chlod > t) & (sd_blisko > f * sd_sk), k_r, min_pole,
+                                             f"chlodniejsze > {t} i tekstura > {f}"), najl)
+    if najl is None:
+        raise RuntimeError("[rgb] Nie znaleziono znacznika (musi byc caly w kadrze)")
+    zgodnosc, opis, maska = najl
+    gc = _grabcut(im, maska)
+    if gc is not None:
+        z_gc = zgodnosc_z_wzorcem(gc)
+        wsp = np.count_nonzero((gc > 0) & (maska > 0)) / max(1, np.count_nonzero((gc > 0) | (maska > 0)))
+        if z_gc >= zgodnosc - 0.06 and wsp >= 0.7:
+            maska, zgodnosc, opis = gc, z_gc, opis + " + GrabCut"
+    return dict(maska=maska, sc=sc, im=im, zgodnosc=zgodnosc, opis=opis)
+
+
+def wykryj_znacznik_rgb(sciezka, maska_ter=None):
+    """
+    Znacznik na zdjeciu RGB (wykryj_folie_rgb). maska_ter nie jest potrzebna (zostaje dla zgodnosci
+    wywolan) - ksztalt jest porownywany z wzorcem Π, nie z termowizja.
+    Zwraca dict: maska (w skali roboczej), sc (skala robocza), obraz (oryginal), im, zgodnosc.
     """
     img = imread(sciezka, cv2.IMREAD_COLOR)
     if img is None:
         raise FileNotFoundError(f"Nie mozna otworzyc: {sciezka}")
-    H0, W0 = img.shape[:2]
-    sc = min(1.0, RGB_DET_PX / max(H0, W0))
-    im = cv2.resize(img, (int(round(W0*sc)), int(round(H0*sc))), interpolation=cv2.INTER_AREA)
-    H, W = im.shape[:2]
-    k = _kolo(max(2, min(H, W) // 200))
-    ma_dziure = udzial_dziur(maska_ter) > 0.05
-    min_pole = 0.0007 * H * W
-
-    # przebieg 1: folia = niskie nasycenie barwy
-    lab = cv2.cvtColor(im, cv2.COLOR_BGR2LAB).astype(np.float32)
-    C = cv2.GaussianBlur(np.hypot(lab[..., 1] - 128, lab[..., 2] - 128), (0, 0), 1.5)
-    c_skora = float(np.percentile(C, 90))
-    najl = None
-    for f in (0.15, 0.22, 0.30, 0.38, 0.46, 0.55, 0.65):
-        niskie = (C < f * c_skora).astype(np.uint8) * 255
-        najl = _najlepszy_kandydat(_skladowe(niskie, k, min_pole), maska_ter, ma_dziure,
-                                   najl, f"chroma < {f:.2f}*skora")
-    if najl is None:
-        raise RuntimeError(f"[rgb] Brak kandydatow na znacznik w {sciezka}")
-
-    # przebieg 2: folia = wszystko, co odbiega od lokalnego koloru skory
-    #   (lapie tez lustrzana folie odbijajaca biel albo rozowa skore)
-    D, roi = odleglosc_od_skory(im, najl[2])
-    for t in (2.5, 3.5, 5.0, 7.0):
-        inne = (D > t).astype(np.uint8) * 255
-        najl = _najlepszy_kandydat(_skladowe(inne, k, min_pole, roi), maska_ter, ma_dziure,
-                                   najl, f"odl. od skory > {t}")
-
-    ocena, opis, maska = najl
-    c, pole = srodek_pole(maska)
+    w = wykryj_folie_rgb(img)
+    sc = w["sc"]
+    c, pole = srodek_pole(w["maska"])
     print(f"  [rgb]    srodek=({c[0]/sc:.1f},{c[1]/sc:.1f})  promien rown.={np.sqrt(pole/np.pi)/sc:.1f}px  "
-          f"kryterium: {opis}  zgodnosc ksztaltu IoU={ocena:.3f}  obraz={W0}x{H0}")
-    if ocena < 0.6:
-        print("  OSTRZEZENIE [rgb] slabe podobienstwo ksztaltu do termalu - sprawdz _debug_rgb.png")
-    return dict(maska=maska, sc=sc, obraz=img, im=im)
+          f"zgodnosc z wzorcem Pi={w['zgodnosc']:.3f}  kryterium: {w['opis']}  obraz={img.shape[1]}x{img.shape[0]}")
+    if w["zgodnosc"] < MIN_ZGODNOSC:
+        print("  OSTRZEZENIE [rgb] znacznik wykryty niepewnie - sprawdz _debug_rgb.png")
+    return dict(maska=w["maska"], sc=sc, obraz=img, im=w["im"], zgodnosc=w["zgodnosc"])
 
 
 # ── Dopasowanie ──────────────────────────────────────────────────────────────
@@ -332,6 +374,8 @@ def _podobienstwo(m_rgb, m_ter):
 
 def wstepne_dopasowanie(m_rgb, m_ter):
     W, kat, iou = _podobienstwo(m_rgb, m_ter)
+    if not SPRAWDZ_LUSTRO:
+        return W, kat, iou, False
     # kontrola odbicia lustrzanego (przy asymetrycznym znaczniku jest jednoznaczna)
     lustro = cv2.flip(m_ter, 1)
     Wl, kat_l, iou_l = _podobienstwo(m_rgb, lustro)
