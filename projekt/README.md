@@ -9,12 +9,14 @@ Inzynierka/
 │   ├── dopasowanie3.py           metoda rejestracji (ECC na maskach znacznika)
 │   ├── read_flirpy.py            nagrania .seq (FLIR) → obrazy (plik albo cały folder)
 │   ├── heic_do_jpg.py            zdjęcia HEIC → JPG numerowane wg czasu wykonania
+│   ├── import_cvat.py            adnotacje z CVAT → maski i narożniki znacznika w dane/pary/N/
 │   ├── modele_segmentacja/       segmentacja znamienia: PanDerm, tester, znacznik Π (własny README)
 │   └── README.md                 ten plik
 ├── dane/                         nowe dane (poza gitem)
 │   ├── dane_RGB/                 zdjęcia z telefonu: 1.jpg, 2.jpg, …
 │   ├── dane_termowizja/          obrazy termowizyjne: 1.jpg, 2.jpg, …
-│   ├── pary/                     pary RGB–termal do dopasowania
+│   ├── pary/                     pary RGB–termal: rgb.jpg, termal.jpg, maski z CVAT, narozniki.json
+│   ├── adnotacje/                eksporty CVAT (rgb.zip, termowizja.zip) + podsumowanie.csv
 │   └── mapowanie_*.csv           numer → oryginalny plik (IMG_xxxx.heic, thermalNNNN.SEQ)
 ├── wyniki/                       (poza gitem)
 │   ├── wyniki_dopasowania/       aplikacja.py, dopasowanie3.py
@@ -48,6 +50,7 @@ Ciężkie pliki modeli (środowisko z PyTorch, wagi, ISIC 2018) leżą poza OneD
 | Kontrola znacznika na nowych zdjęciach | przeciągnij `dane\dane_RGB` na `projekt\modele_segmentacja\sprawdz_znaczniki.bat` | `wyniki/wyniki_segmentacji/znaczniki/` |
 | Nagrania .seq → JPG | `python projekt\read_flirpy.py <folder z .seq> --numeruj` | `dane/dane_termowizja/N.jpg` + `dane/mapowanie_dane_termowizja.csv` |
 | Zdjęcia HEIC → JPG | `python projekt\heic_do_jpg.py` (wymaga `pip install pillow-heif`) | `dane/dane_RGB/N.jpg` + `dane/mapowanie_dane_RGB.csv`; HEIC do `archiwum/dane/oryginaly_heic/` |
+| Import adnotacji z CVAT | eksporty „CVAT for images 1.1” do `dane\adnotacje\`, potem `python projekt\import_cvat.py` | maski i `narozniki.json` w `dane/pary/N/`, `dane/adnotacje/podsumowanie.csv`, podglądy w `wyniki/kontrola_adnotacji/` |
 | Klatki jednego nagrania | ustaw `FILEPATH` w `projekt/read_flirpy.py` i uruchom bez argumentów | `frame_NNN.png` obok nagrania z `dane/` (albo `dane/dane_termowizja/<nagranie>/`) |
 | Trening PanDerm | `projekt\modele_segmentacja\trenuj_panderm.bat` | wagi w `modele_dane\wagi\`, wykres w `wyniki/wyniki_segmentacji/` |
 
