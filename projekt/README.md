@@ -10,12 +10,17 @@ Inzynierka/
 │   ├── read_flirpy.py            nagrania .seq (FLIR) → obrazy (plik albo cały folder)
 │   ├── heic_do_jpg.py            zdjęcia HEIC → JPG numerowane wg czasu wykonania
 │   ├── import_cvat.py            adnotacje z CVAT → maski i narożniki znacznika w dane/pary/N/
+│   ├── temperatury_par.py        nagrania SEQ → mapy temperatur °C (dane/pary/N/termal_C.npy)
+│   ├── potok_pary.py             analiza pary: rejestracja → przeniesienie ROI → pomiary → zgodność → raport
+│   ├── analiza/                  moduły potoku: dane, geometria, miary, pomiary, raport
 │   ├── modele_segmentacja/       segmentacja znamienia: PanDerm, tester, znacznik Π (własny README)
 │   └── README.md                 ten plik
 ├── dane/                         nowe dane (poza gitem)
 │   ├── dane_RGB/                 zdjęcia z telefonu: 1.jpg, 2.jpg, …
 │   ├── dane_termowizja/          obrazy termowizyjne: 1.jpg, 2.jpg, …
-│   ├── pary/                     pary RGB–termal: rgb.jpg, termal.jpg, maski z CVAT, narozniki.json
+│   ├── pary/                     pary RGB–termal: rgb.jpg, termal.jpg, termal_C.npy, maski z CVAT, narozniki.json
+│   ├── znamiona.csv              para → numer znamienia i fold (podział trening/test po znamionach)
+│   ├── temperatury.csv           temperatura skóry w każdej parze (kontrola map °C)
 │   ├── adnotacje/                eksporty CVAT (rgb.zip, termowizja.zip) + podsumowanie.csv
 │   └── mapowanie_*.csv           numer → oryginalny plik (IMG_xxxx.heic, thermalNNNN.SEQ)
 ├── wyniki/                       (poza gitem)
@@ -51,6 +56,8 @@ Ciężkie pliki modeli (środowisko z PyTorch, wagi, ISIC 2018) leżą poza OneD
 | Nagrania .seq → JPG | `python projekt\read_flirpy.py <folder z .seq> --numeruj` | `dane/dane_termowizja/N.jpg` + `dane/mapowanie_dane_termowizja.csv` |
 | Zdjęcia HEIC → JPG | `python projekt\heic_do_jpg.py` (wymaga `pip install pillow-heif`) | `dane/dane_RGB/N.jpg` + `dane/mapowanie_dane_RGB.csv`; HEIC do `archiwum/dane/oryginaly_heic/` |
 | Import adnotacji z CVAT | eksporty „CVAT for images 1.1” do `dane\adnotacje\`, potem `python projekt\import_cvat.py` | maski i `narozniki.json` w `dane/pary/N/`, `dane/adnotacje/podsumowanie.csv`, podglądy w `wyniki/kontrola_adnotacji/` |
+| Mapy temperatur °C | `python projekt\temperatury_par.py` (emisyjność skóry 0,98) | `dane/pary/N/termal_C.npy`, `dane/temperatury.csv` |
+| Analiza jednej pary | `python projekt\potok_pary.py 1` | `wyniki/wyniki_obu/para_1/raport.html` + `metryki.json`, rejestracja w `wyniki/wyniki_dopasowania/para_1/` |
 | Klatki jednego nagrania | ustaw `FILEPATH` w `projekt/read_flirpy.py` i uruchom bez argumentów | `frame_NNN.png` obok nagrania z `dane/` (albo `dane/dane_termowizja/<nagranie>/`) |
 | Trening PanDerm | `projekt\modele_segmentacja\trenuj_panderm.bat` | wagi w `modele_dane\wagi\`, wykres w `wyniki/wyniki_segmentacji/` |
 

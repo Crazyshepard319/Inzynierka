@@ -75,6 +75,28 @@ def wczytaj_klatki(sciezka, ile=None):
     return np.stack(klatki)
 
 
+EMISYJNOSC_SKORY = 0.98      # przyjmowana dla skory czlowieka (w kamerze ustawiono 0,96)
+
+
+def temperatura_c(sciezka, emisyjnosc=EMISYJNOSC_SKORY, klatka=0):
+    """Mapa temperatur [°C] klatki nagrania, piksel w piksel jak obraz z wczytaj_klatki()
+    (te same poprawki: obciete wiersze telemetrii, przesuniecie kolumn). Przeliczenie surowych
+    wartosci stalymi Plancka i parametrami z pliku (flirpy raw2temp); emisyjnosc=None: wartosc z kamery.
+    Zwraca (mapa float32, uzyte metadane). Temperatura folii znacznika nie ma sensu (emisyjnosc ~0,05)."""
+    seq = Seq(str(sciezka))
+    frm = seq[klatka]
+    h = utnij_telemetrie(np.asarray(frm.get_image())).shape[0]
+    meta = dict(frm.meta)
+    if emisyjnosc is not None:
+        meta["Emissivity"] = float(emisyjnosc)
+    with np.errstate(all="ignore"):                   # wiersze telemetrii (0/65535) daja NaN - i tak obcinane
+        t = np.asarray(frm.get_radiometric_image(meta=meta), dtype=np.float64)[:h]
+    roll = HORIZONTAL_ROLL_PIXELS.get(t.shape[1], 0)
+    if roll:
+        t = np.roll(t, roll, axis=1)
+    return t.astype(np.float32), meta
+
+
 def zapisz_klatki(klatki, sciezki, quiet=False):
     """Normalizacja wspolna dla calego nagrania (percentyle 2-98) i zapis z paleta inferno."""
     lo, hi = PERCENTILE_RANGE
