@@ -58,6 +58,7 @@ Ciężkie pliki modeli (środowisko z PyTorch, wagi, ISIC 2018) leżą poza OneD
 | Import adnotacji z CVAT | eksporty „CVAT for images 1.1” do `dane\adnotacje\`, potem `python projekt\import_cvat.py` | maski i `narozniki.json` w `dane/pary/N/`, `dane/adnotacje/podsumowanie.csv`, podglądy w `wyniki/kontrola_adnotacji/` |
 | Mapy temperatur °C | `python projekt\temperatury_par.py` (emisyjność skóry 0,98) | `dane/pary/N/termal_C.npy`, `dane/temperatury.csv` |
 | Analiza par (te same etapy co aplikacja, PanDerm) | `projekt\potok_pary.bat 1` albo `projekt\potok_pary.bat 1 3 10-20` (Python środowiska modeli) | `wyniki/wyniki_obu/para_1/raport.html` + `metryki.json`, rejestracja w `wyniki/wyniki_dopasowania/para_1/` |
+| Porównanie metod rejestracji (E4) | `"%USERPROFILE%\modele_dane\srodowisko\Scripts\python.exe" projekt\porownaj_rejestracje.py 1-94` | `wyniki/wyniki_dopasowania/porownanie_rejestracji.csv` (dopasowanie3 vs SimpleITK z `dopasowanie2_pi.py`) |
 | Klatki jednego nagrania | ustaw `FILEPATH` w `projekt/read_flirpy.py` i uruchom bez argumentów | `frame_NNN.png` obok nagrania z `dane/` (albo `dane/dane_termowizja/<nagranie>/`) |
 | Trening PanDerm | `projekt\modele_segmentacja\trenuj_panderm.bat` | wagi w `modele_dane\wagi\`, wykres w `wyniki/wyniki_segmentacji/` |
 

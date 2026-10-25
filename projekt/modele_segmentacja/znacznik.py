@@ -4,7 +4,7 @@ Obszar analizy z wnetrza znacznika ㄇ (Π) na zdjeciu RGB - bez obrazu termalne
 Znamie lezy miedzy ramionami znacznika, wiec model segmentacji dostaje tylko
 wnetrze znacznika, a nie cale zdjecie:
   1. Folia: ta sama detekcja co w rejestracji (dopasowanie3.wykryj_folie_rgb: barwa chlodniejsza
-     od skory i tekstura, wybor kandydata po podobienstwie do wzorca Π 35 x 26 mm, pasek 10 mm).
+     od skory i tekstura, wybor kandydata po podobienstwie do wzorca Π 35 x 26 mm, pasek 9 mm).
   2. Wnetrze = otoczka wypukla folii minus folia (otwor miedzy ramionami).
   3. Obszar = wnetrze poszerzone o margines (znamie moze wystawac za linie
      konca ramion), bez folii. ROI = prostokat obejmujacy obszar.

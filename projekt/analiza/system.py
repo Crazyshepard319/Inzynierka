@@ -41,7 +41,7 @@ from . import geometria as geo, miary, obrazy, pomiary, raport   # noqa: E402
 from .dane import DANE, INZ, PARY, imread, info_pary, wzorzec_pary   # noqa: E402
 
 GESTOSC = 4      # przeniesione obszary w siatce termowizji 4x gestszej (dokladnosc pola ~1%)
-POLE_OTWORU_MM2 = (dop.BELKA - 2 * dop.PASEK) * (dop.RAMIE - dop.PASEK)     # 15 x 16 = 240 mm2
+POLE_OTWORU_MM2 = (dop.BELKA - 2 * dop.PASEK) * (dop.RAMIE - dop.PASEK)     # 17 x 17 = 289 mm2
 OPIS_NAROZNIKOW = "automatycznie (wzorzec Π dopasowany do maski znacznika z rejestracji)"
 OPIS_ZNAMIENIA = "PanDerm (model M1)"
 ETAPY = ("wejscie", "rejestracja", "segmentacja", "przeniesienie", "pomiary", "raport")
@@ -80,7 +80,7 @@ def para_z_plikow(zdjecie, termowizja):
 
 
 def narozniki_wzorca(maska, homografia=True):
-    """8 naroznikow znacznika z jego maski: wzorzec Π (35 x 26 mm, pasek 10 mm) dopasowany do maski.
+    """8 naroznikow znacznika z jego maski: wzorzec Π (35 x 26 mm, pasek 9 mm) dopasowany do maski.
     Najpierw podobienstwo (srodek, skala z pola, kat z przeszukania 360°), potem ECC na rozmytych
     maskach: afiniczne i homografia (jak w dopasowanie3.py). Caly ksztalt ustala polozenie naroznikow,
     wiec postrzepiona krawedz maski (wlosy, odblaski) przesuwa je mniej niz przy szukaniu rogow konturu.

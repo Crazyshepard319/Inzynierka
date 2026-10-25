@@ -2,7 +2,7 @@
 Rejestracja multimodalna: RGB <-> termal (wersja 3)
 Eksportuje: run_registration(rgb_path, ter_path, out_path, model=MODEL)
 
-Idea: transformacje wyznacza sam znacznik Π (folia 35 x 26 mm, pasek 10 mm), a nie cala scena.
+Idea: transformacje wyznacza sam znacznik Π (folia 35 x 26 mm, pasek 9 mm), a nie cala scena.
   1. Termal: kandydaci = obszary ciemniejsze od skory albo teksturowane (odbicia w folii); wybierany
      jest najbardziej podobny ksztaltem do wzorca Π; krawedz z lokalnego progu (polowa drogi
      miedzy folia a skora).
@@ -127,10 +127,10 @@ def krzywa_iou(ref, mov, katy, sz=128):
 
 
 # ── Wzorzec znacznika ────────────────────────────────────────────────────────
-# Znacznik Π z folii: belka 35 mm, ramiona 26 mm, pasek 10 mm; narozniki w tej samej kolejnosci
+# Znacznik Π z folii: belka 35 mm, ramiona 26 mm, pasek 9 mm; narozniki w tej samej kolejnosci
 # co w import_cvat.py. Kandydat na znacznik jest wybierany wedlug podobienstwa ksztaltu do tego wzorca
 # (osobno w kazdej modalnosci - blad detekcji w jednej nie psuje drugiej).
-BELKA, RAMIE, PASEK = 35.0, 26.0, 10.0
+BELKA, RAMIE, PASEK = 35.0, 26.0, 9.0
 WZORZEC_MM = np.array([[0, 0], [BELKA, 0], [BELKA, RAMIE], [BELKA - PASEK, RAMIE], [BELKA - PASEK, PASEK],
                        [PASEK, PASEK], [PASEK, RAMIE], [0, RAMIE]], np.float64)
 MIN_ZGODNOSC = 0.65   # IoU ksztaltu z wzorcem; ponizej detekcja jest niepewna (na 94 parach poprawne >= 0,68)

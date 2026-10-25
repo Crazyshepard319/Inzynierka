@@ -76,8 +76,8 @@ OBJASNIENIA = [
          "błędu automatycznych narożników. Odległość liczona w milimetrach na płaszczyźnie "
          "znacznika (homografia termowizji px → mm). Raport podaje średnią i maksimum z 8 narożników. "
          "Punkty odniesienia: rozmiar piksela termowizji (tabela kontroli skali; w tych danych ok. 0,2 mm) oraz "
-         "niepewność samych adnotacji – oznaczone narożniki odbiegają od idealnego kształtu 35 × 26 mm średnio "
-         "o 0,7–0,9 mm (RMS narożników). TRE rzędu 0,5–1 mm jest więc na poziomie dokładności wzorca."),
+         "niepewność samych adnotacji – oznaczone narożniki odbiegają od idealnego kształtu Π (35 × 26 mm, pasek 9 mm) średnio "
+         "o ok. 0,5 mm (RMS narożników). TRE rzędu 0,5–1 mm jest więc na poziomie dokładności wzorca."),
         ("dice", "Dice",
          "Pokrycie dwóch obszarów: A – przeniesionego ze zdjęcia, B – oznaczonego na termowizji. "
          "<span class='wzor'>Dice = 2·|A ∩ B| / (|A| + |B|)</span>, gdzie |·| to pole. 1 = obszary identyczne, "
@@ -107,15 +107,15 @@ OBJASNIENIA = [
     ("Kontrola skali i rozdzielczości", [
         ("rms", "Narożniki znacznika (automatyczne)",
          "Skalę w mm daje homografia z 8 narożników znacznika do jego wymiarów (belka 35 mm, ramiona 26 mm, pasek "
-         "10 mm). Narożniki są wyznaczane automatycznie: wzorzec Π o tych wymiarach jest dopasowywany do maski "
+         "9 mm). Narożniki są wyznaczane automatycznie: wzorzec Π o tych wymiarach jest dopasowywany do maski "
          "znacznika z rejestracji (najpierw obrót, skala i położenie, potem przekształcenie afiniczne i homografia "
          "metodą ECC), a narożniki to 8 wierzchołków dopasowanego wzorca. <b>IoU wzorca</b> to pokrycie maski "
          "znacznika przez dopasowany kształt Π; poniżej ok. 0,8 dopasowanie jest niepewne. <b>Błąd względem CVAT</b> "
          "(dla par z adnotacjami) to średnia odległość 8 narożników automatycznych od oznaczonych ręcznie, w mm."),
-        ("otwor240", "Pole otworu na termowizji",
-         "Nominalnie otwór znacznika ma 15 × 16 mm = 240 mm². Porównujemy dwa pola zmierzone w mm na termowizji "
+        ("otwor", "Pole otworu na termowizji",
+         "Nominalnie otwór znacznika ma 17 × 17 mm = 289 mm². Porównujemy dwa pola zmierzone w mm na termowizji "
          "(homografią termowizji): otworu przeniesionego ze zdjęcia przez T i otworu wyznaczonego na samej "
-         "termowizji (narożniki dopasowane do maski znacznika na termowizji, więc 240 mm² z definicji). Ich "
+         "termowizji (narożniki dopasowane do maski znacznika na termowizji, więc 289 mm² z definicji). Ich "
          "stosunek (1 = równe) to łączny błąd rejestracji i skali, dostępny także bez adnotacji."),
         ("pole_tr", "Pole znamienia: termowizja / RGB",
          "Pole maski znamienia przeniesionej na termowizję (suma ułamków pokrycia pikseli × rozmiar piksela²) "
@@ -256,7 +256,7 @@ def sekcje(w):
         ("wewn", "Wewnętrzna kontrola: błąd krawędzi", f"{_f(rej.get('blad_krawedzi_px'))} px", "w pikselach termowizji"),
     ]))
     wiersze = [
-        ("otwor240", "Pole otworu: przeniesiony / na termowizji",
+        ("otwor", "Pole otworu: przeniesiony / na termowizji",
          f"{_f(ks['pole_otworu_przeniesionego_mm2'], 1)} / {_f(ks['pole_otworu_termal_mm2'], 1)} mm²",
          f"stosunek {_f(ks['stosunek_pol_otworu'], 3)}; nominalnie {_f(ks['pole_otworu_wzorzec_mm2'], 0)} mm²"),
         ("pole_tr", "Pole znamienia: termowizja / RGB", _f(ks['pole_znamienia_termal_do_rgb'], 3), "zgodność skali obu modalności (1 = równe)"),
@@ -336,7 +336,7 @@ def zapisz(sciezka, w, obrazy):
  kandydat wybierany po podobieństwie do wzorca Π, bez adnotacji), dopasowanie kształtów → macierz T
  (piksel zdjęcia → piksel termowizji).</li>
 <li><b>Segmentacja</b>: narożniki znacznika – {e(zr['narozniki'])}, z nich skala w mm (homografia do wymiarów
- 35 × 26 mm); znamię – {e(zr['znamie'])}.</li>
+ 35 × 26 mm, pasek 9 mm); znamię – {e(zr['znamie'])}.</li>
 <li><b>Przeniesienie ROI</b>: obrys znamienia, obrys i otwór znacznika oraz 8 narożników ze zdjęcia na termowizję
  (przez T).</li>
 <li><b>Pomiary i zgodność</b>: wymiary i kolor znamienia w mm; kontrola skali (pole otworu

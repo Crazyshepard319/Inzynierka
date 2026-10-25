@@ -13,11 +13,11 @@ Raporty:
     wyniki/kontrola_adnotacji/przeglad.jpg   wszystkie pary na jednej planszy
 Pliki zip nie sa zmieniane; po poprawkach w CVAT wystarczy wyeksportowac je ponownie i uruchomic import.
 
-Wzorzec znacznika Π [mm]: belka 35, ramiona 26, szerokosc paska 10 (otwor 15 x 16 mm = 240 mm2).
+Wzorzec znacznika Π [mm]: belka 35, ramiona 26, szerokosc paska 9 (otwor 17 x 17 mm = 289 mm2).
 Kolejnosc naroznikow wzorca (zgodnie z ruchem wskazowek zegara, belka u gory):
     0 (0,0) lewy gorny   1 (35,0) prawy gorny   2 (35,26) koniec prawego ramienia (zewn.)
-    3 (25,26) koniec prawego ramienia (wewn.)    4 (25,10) wewn. naroznik prawy
-    5 (10,10) wewn. naroznik lewy   6 (10,26) koniec lewego ramienia (wewn.)   7 (0,26) (zewn.)
+    3 (26,26) koniec prawego ramienia (wewn.)    4 (26,9) wewn. naroznik prawy
+    5 (9,9) wewn. naroznik lewy   6 (9,26) koniec lewego ramienia (wewn.)   7 (0,26) (zewn.)
 Kolejnosc i kierunek klikniec w CVAT sa dowolne - dopasowanie do wzorca robi skrypt.
 """
 import csv
@@ -36,7 +36,7 @@ ADNOTACJE = INZ / "dane" / "adnotacje"
 PARY = INZ / "dane" / "pary"
 KONTROLA = INZ / "wyniki" / "kontrola_adnotacji"
 
-BELKA, RAMIE, PASEK = 35.0, 26.0, 10.0
+BELKA, RAMIE, PASEK = 35.0, 26.0, 9.0
 WZORZEC_MM = np.array([[0, 0], [BELKA, 0], [BELKA, RAMIE], [BELKA - PASEK, RAMIE], [BELKA - PASEK, PASEK],
                        [PASEK, PASEK], [PASEK, RAMIE], [0, RAMIE]], np.float64)
 PROG_RMS_MM = 1.0          # dopasowanie naroznikow gorsze niz 1 mm -> do sprawdzenia

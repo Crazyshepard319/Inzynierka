@@ -538,7 +538,7 @@ class Aplikacja(ctk.CTk):
     def _zakladka_segmentacja(self, t):
         p = self._panel(t)
         self._naglowek(p, "Znacznik i znamię", 0)
-        self._opis(p, "Narożniki znacznika: wzorzec Π (35 × 26 mm, pasek 10 mm) dopasowany do maski znacznika "
+        self._opis(p, "Narożniki znacznika: wzorzec Π (35 × 26 mm, pasek 9 mm) dopasowany do maski znacznika "
                       "z rejestracji → skala w mm. Znamię: model PanDerm we wnętrzu znacznika (osobne środowisko "
                       "modeli z PyTorch; pierwsze uruchomienie wczytuje wagi).", 1)
         self._btn_seg = self._przycisk(p, "Wyznacz narożniki i znamię", self._segmentuj, 2, glowny=True)
