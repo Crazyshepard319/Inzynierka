@@ -48,12 +48,11 @@ Podgląd: kółko myszy = zoom, przeciąganie = przesuwanie, *Przybliż do obsza
 
 `znacznik.py`. Znamię leży między ramionami znacznika, więc model nie przeszukuje całego zdjęcia:
 
-1. **Folia** — jasne, szare obszary: te same kryteria co w `dopasowanie3.py` (niskie nasycenie
-   barwy, odległość od koloru skóry) plus warunek jasności, który oddziela folię od ciemnych
-   włosów. Wybierany jest kandydat najbardziej podobny do szablonu Π (IoU po obrocie) — obraz
-   termalny nie jest potrzebny. Kształt szablonu zmierzony na zdjęciach z 17.10: ramiona
-   0,70 długości belki, pasek taśmy 0,24 (`GLEBOKOSC`, `PASEK`).
-2. **Wnętrze** = otoczka wypukła folii − folia (otwór między ramionami).
+1. **Folia** — ta sama detekcja co w rejestracji (`dopasowanie3.wykryj_folie_rgb`): barwa chłodniejsza
+   od skóry i tekstura folii, wybór kandydata najbardziej podobnego do wzorca Π (belka 35 mm, ramiona
+   26 mm, pasek 9 mm) — obraz termalny nie jest potrzebny. W aplikacji używana jest maska folii
+   z rejestracji (`znacznik_z_maski`).
+2. **Wnętrze** = otoczka wypukła folii − folia (otwór 17 × 17 mm między ramionami).
 3. **Obszar** = wnętrze + margines 8% (znamię może wystawać za linię końców ramion), bez pasa
    przy krawędzi folii (ciemny brzeg taśmy, cień). **ROI** = prostokąt obejmujący obszar.
 
@@ -62,16 +61,45 @@ wejściu modelu zastępowane medianą koloru skóry — inaczej skóra w otworze
 plama otoczona jasną ramką, czyli jak znamię w ISIC — a maska znamienia jest ograniczana do
 obszaru w każdym przebiegu, także po automatycznym przybliżeniu.
 
-Kryteria akceptacji: zgodność kształtu ≥ 0,70, albo ≥ 0,58 przy typowym udziale otworu
-(0,22–0,48 otoczki; zdjęcie mocno pod kątem obniża zgodność do ok. 0,64–0,75); otoczka znacznika
-≥ 2% zdjęcia. Na 10 zdjęciach z `znamiona/`: znacznik znaleziony na 5/5 zdjęciach z
-znacznikiem (zgodność 0,91–0,95), żadnego fałszywego na 5 bez znacznika (zgodność ≤ 0,55).
+Kryterium akceptacji: zgodność kształtu z wzorcem Π ≥ 0,65 (`dopasowanie3.MIN_ZGODNOSC`) i udział
+otworu 0,15–0,60 otoczki.
 
 **Sprawdzenie zdjęć przed adnotacją w CVAT:** przeciągnij folder ze zdjęciami na
 `sprawdz_znaczniki.bat` (podfoldery = znamiona: `znamie_01/`, `znamie_02/`, …). Wynik w
 `wyniki/wyniki_segmentacji/znaczniki/<folder>_<data>/`: podgląd każdego zdjęcia (zielony = folia, żółty = wnętrze,
 pomarańczowy = ROI) i `znaczniki.csv` (zgodność, udział wnętrza, ROI, powód, gdy nie znaleziono).
 Zdjęcia HEIC trzeba najpierw wyeksportować do JPG.
+
+## Kandydaci na znamię (`propozycje.py`)
+
+PanDerm uczono na ISIC, gdzie znamię zajmuje ok. połowy kadru. Wnętrze znacznika ma 17 × 17 mm,
+a znamię zwykle 1–4 mm, więc gdy model dostaje całe wnętrze, często zaznacza duży fragment skóry
+(cień przy folii, włosy), a automatyczne przybliżenie przybliża się do tego błędnego obszaru.
+Dlatego `segmentuj_w_znaczniku` (aplikacja, `segmentuj_znamie.py`, tester przy obszarze ze znacznika):
+
+1. `propozycje.py` szuka do 3 kandydatów: ciemne plamy względem lokalnego tła skóry (jasność L po
+   usunięciu włosów domknięciem ~0,2 mm, tło = mediana w oknie 8 mm, poza obszarem wartość
+   najbliższej skóry, więc cień przy folii nie odstaje), odrzucane pasy cienia wzdłuż folii,
+   kształty niezwarte i wydłużone (włos, zmarszczka);
+2. model segmentuje każdego kandydata w kadrze jak w ISIC (znamię ~0,53 boku) z automatycznym
+   przybliżeniem;
+3. zostaje wynik o największym **kontraście brzegu** (średnia ciemność w masce minus w pasie 0,4 mm
+   tuż za jej brzegiem); gdy przybliżanie „odpłynie” na skórę (kontrast spadnie poniżej 0,7
+   najlepszego przebiegu), zostaje przebieg o największym kontraście.
+
+Gdy nie ma kandydatów — jak dawniej (kadr = całe wnętrze). Ręcznie zaznaczony prostokąt w testerze
+działa bez zmian.
+
+Wynik na 94 parach z adnotacjami CVAT (Dice maski PanDerm z maską z CVAT, 25.10):
+
+| metoda | średni Dice | mediana | Dice < 0,5 | Dice ≥ 0,8 |
+|---|---|---|---|---|
+| kadr = całe wnętrze (dawniej) | 0,38 | 0,06 | 56/94 | 32/94 |
+| kandydaci (teraz) | 0,85 | 0,90 | 3/94 | 81/94 |
+
+Trzy słabe pary: 75 i 76 (nie znaleziono znacznika) oraz 81 (znamię w cieniu tuż przy folii).
+Nowa metoda nie jest gorsza od dawnej na żadnej parze. Przeliczenie (GPU): `ocen_segmentacje.bat`
+→ `wyniki/wyniki_segmentacji/ocena_<model>_<data>/ocena.csv`.
 
 ## Modele
 

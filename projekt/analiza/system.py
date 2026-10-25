@@ -312,7 +312,7 @@ class Analiza:
     # ── 5. pomiary i zgodnosc ───────────────────────────────────────────────
     def zmierz(self):
         self._wymagaj("przeniesienie")
-        p_rgb = pomiary.parametry_rgb(self.rgb, self.maska_znamie, self.H_rgb, self.maska_znacznika_rgb)
+        p_rgb = pomiary.parametry_rgb(self.rgb, self.maska_znamie, self.H_rgb)
         ul = self.przeniesione["ulamek"]
         s_t = geo.mm_na_px(self.H_termal, self.narozniki_termal.mean(0))
         kontrola = {
@@ -327,7 +327,7 @@ class Analiza:
         kontrola["stosunek_pol_otworu"] = kontrola["pole_otworu_przeniesionego_mm2"] / kontrola["pole_otworu_termal_mm2"]
         w = {"info": dict(self.info), "zrodla": {"narozniki": OPIS_NAROZNIKOW, "znamie": OPIS_ZNAMIENIA},
              "rejestracja": self.rej, "narozniki": self.dopasowanie_naroznikow,
-             "pomiary_rgb": p_rgb, "pierscien_mm": pomiary.PIERSCIEN_MM, "kontrola_skali": kontrola,
+             "pomiary_rgb": p_rgb, "kontrola_skali": kontrola,
              "zgodnosc": None, "segmentacja_vs_cvat": None}
         wz = self.wzorzec
         if wz is not None:                                   # ocena: wzorzec z CVAT

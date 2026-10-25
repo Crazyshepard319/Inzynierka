@@ -9,7 +9,8 @@ Obsluga podgladu:
   przeciaganie LPM     - przesuwanie (gdy nie zaznaczasz obszaru ani nie rysujesz)
   tryb "Zaznacz obszar"- przeciagnij prostokat wokol znamienia
   "Ze znacznika Π"     - obszar = wnetrze znacznika (szukany tez automatycznie po wczytaniu);
-                         maska znamienia jest ograniczana do wnetrza
+                         maska znamienia jest ograniczana do wnetrza; model z kadrem jak w ISIC (PanDerm)
+                         dostaje kadry wokol kandydatow na znamie (propozycje.py), jak w aplikacji
   tryb "Rysuj wzorzec" - klikaj punkty wokol znamienia, PPM / Enter zamyka obrys,
                          Backspace cofa punkt, Esc anuluje
 """
@@ -37,10 +38,11 @@ from modele_segmentacja.interfejs import wczytaj_obraz, zapisz_obraz
 from modele_segmentacja.konfiguracja import WYNIKI
 
 try:
-    from modele_segmentacja.znacznik import BrakZnacznika, wykryj_znacznik
+    from modele_segmentacja.znacznik import BrakZnacznika, segmentuj_w_znaczniku, wykryj_znacznik
     _BLAD_ZNACZNIKA = ""
 except Exception as _e:          # np. brak dopasowanie3.py obok folderu modele_segmentacja
     BrakZnacznika, wykryj_znacznik, _BLAD_ZNACZNIKA = RuntimeError, None, str(_e)
+    segmentuj_w_znaczniku = None
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -347,10 +349,11 @@ class Tester(ctk.CTk):
         self._zajety = True
         self.btn_seg.configure(state="disabled")
         obszar = self.znacznik.obszar if self.znacznik is not None else None
-        threading.Thread(target=self._watek, args=(wybrane, self.obraz, self.roi, self.przyblizaj.get(), obszar),
+        z = self.znacznik if self.znacznik is not None and self.roi == self.znacznik.roi else None
+        threading.Thread(target=self._watek, args=(wybrane, self.obraz, self.roi, self.przyblizaj.get(), obszar, z),
                          daemon=True).start()
 
-    def _watek(self, klucze, obraz, roi, przyblizaj, obszar=None):
+    def _watek(self, klucze, obraz, roi, przyblizaj, obszar=None, znacznik=None):
         for k in klucze:
             m = self.modele[k]
             try:
@@ -362,7 +365,11 @@ class Tester(ctk.CTk):
                     self._q.put(("status", f"{m.nazwa}: wczytano w {time.time() - t0:.1f} s"
                                            + (f" ({dop})" if dop else "")))
                 self._q.put(("status", f"Segmentacja: {m.nazwa}..."))
-                self._q.put(("wynik", k, m.segmentuj(obraz, roi, przyblizaj=przyblizaj, obszar=obszar)))
+                if znacznik is not None and segmentuj_w_znaczniku is not None:   # obszar = wnetrze znacznika
+                    wynik = segmentuj_w_znaczniku(m, obraz, znacznik, przyblizaj=przyblizaj)
+                else:                                                            # obszar zaznaczony recznie
+                    wynik = m.segmentuj(obraz, roi, przyblizaj=przyblizaj, obszar=obszar)
+                self._q.put(("wynik", k, wynik))
             except Exception as e:
                 self._q.put(("blad", k, str(e)))
         self._q.put(("koniec",))

@@ -132,13 +132,67 @@ def wykryj_znacznik(obraz_bgr, min_zgodnosc=None):
 
 # ── segmentacja i podglad ────────────────────────────────────────────────────
 
-def segmentuj_w_znaczniku(model, obraz_bgr, znacznik=None, przyblizaj=True):
+ILE_PROPOZYCJI = 3          # ilu kandydatow na znamie segmentuje model
+SPADEK_KONTRASTU = 0.7      # patrz _segmentuj_kandydatow
+
+
+def segmentuj_w_znaczniku(model, obraz_bgr, znacznik=None, przyblizaj=True, ile_propozycji=ILE_PROPOZYCJI):
     """Segmentacja znamienia tylko we wnetrzu znacznika (maska ograniczona do z.obszar).
-    Wynik: WynikSegmentacji z info["znacznik"]. Wyjatek BrakZnacznika, gdy nie ma znacznika."""
+
+    Modele z kadrem jak w ISIC (kadr_docelowy, np. PanDerm) nie dostaja calego wnetrza: najpierw
+    propozycje.py wskazuje do ile_propozycji ciemnych plam (kandydatow), model segmentuje kazda w kadrze
+    ustawionym jak w ISIC (z automatycznym przyblizeniem), a wybierany jest wynik o najwiekszym
+    kontrascie brzegu (srednia ciemnosc w masce minus tuz za jej brzegiem, propozycje.kontrast_brzegu).
+    Gdy nie ma kandydatow - jak dawniej: kadr = cale wnetrze i automatyczne przyblizenie.
+    Wynik: WynikSegmentacji z info["znacznik"], info["metoda"]. Wyjatek BrakZnacznika, gdy nie ma znacznika."""
     z = znacznik if znacznik is not None else wykryj_znacznik(obraz_bgr)
-    wynik = model.segmentuj(obraz_bgr, roi=z.roi, przyblizaj=przyblizaj, obszar=z.obszar)
+    wynik = None
+    if przyblizaj and model.kadr_docelowy and ile_propozycji:
+        wynik = _segmentuj_kandydatow(model, obraz_bgr, z, ile_propozycji)
+    if wynik is None:
+        wynik = model.segmentuj(obraz_bgr, roi=z.roi, przyblizaj=przyblizaj, obszar=z.obszar)
+        wynik.info["metoda"] = "kadr = cale wnetrze znacznika"
     wynik.info["znacznik"] = z
     return wynik
+
+
+def _segmentuj_kandydatow(model, obraz_bgr, z, ile):
+    from .interfejs import _iou_prostokatow
+    from .propozycje import kontrast_brzegu, mapa_ciemnosci, propozycje
+    mapa = mapa_ciemnosci(obraz_bgr, z)
+    kandydaci = propozycje(obraz_bgr, z, ile, mapa)
+    H, W = obraz_bgr.shape[:2]
+    najlepszy, czas, oceny = None, 0.0, []
+    for i, (maska_k, ocena) in enumerate(kandydaci):
+        kadr, kadry, przebiegi = model._kadr_wokol(maska_k, (H, W)), [], []
+        for _ in range(model.max_przebiegow):          # automatyczne przyblizanie jak w model.segmentuj
+            wy = model._jeden_przebieg(obraz_bgr, kadr, z.obszar)
+            czas += wy.czas_s
+            kadry.append(kadr)
+            if not wy.maska.any():
+                break
+            wy.info["kontrast"] = kontrast_brzegu(mapa, wy.maska)
+            przebiegi.append(wy)
+            nowy = model._kadr_wokol(wy.maska, (H, W))
+            if _iou_prostokatow(nowy, kadr) > 0.9:
+                break
+            kadr = nowy
+        if not przebiegi:
+            continue
+        # zostaje ostatni przebieg; gdy przyblizanie "odplynelo" na skore (kontrast spadl ponizej
+        # SPADEK_KONTRASTU najlepszego przebiegu) - przebieg o najwiekszym kontrascie brzegu
+        wyn_k, maks = przebiegi[-1], max(przebiegi, key=lambda r: r.info["kontrast"])
+        if wyn_k.info["kontrast"] < SPADEK_KONTRASTU * maks.info["kontrast"]:
+            wyn_k = maks
+        wyn_k.info.update(kandydat=i, ocena_kandydata=ocena, kadry=kadry)
+        oceny.append(round(wyn_k.info["kontrast"], 1))
+        if najlepszy is None or wyn_k.info["kontrast"] > najlepszy.info["kontrast"]:
+            najlepszy = wyn_k
+    if najlepszy is not None:
+        najlepszy.czas_s = czas
+        najlepszy.info["metoda"] = (f"kandydat {najlepszy.info['kandydat'] + 1} z {len(kandydaci)} "
+                                    f"(kontrast brzegu: {', '.join(map(str, oceny))})")
+    return najlepszy
 
 
 def podglad(obraz_bgr, z, maks_px=1200):

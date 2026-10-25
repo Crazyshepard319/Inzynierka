@@ -11,6 +11,8 @@ Z wiersza polecen (tak wywoluje go aplikacja, ktorej srodowisko nie ma PyTorch):
 
 Obszar szukania = wnetrze znacznika Π: z maski znacznika z rejestracji (dopasowanie3, dowolna skala)
 albo, gdy jej nie ma lub nie daje wnetrza, z detekcji znacznik.wykryj_znacznik.
+We wnetrzu propozycje.py wskazuje kandydatow (ciemne plamy), model segmentuje kazdego w kadrze jak w ISIC
+i zostaje wynik o najwiekszym kontrascie brzegu (znacznik.segmentuj_w_znaczniku).
 """
 import argparse
 import sys
@@ -52,7 +54,7 @@ def segmentuj(obraz, maska_znacznika=None, model=MODEL, log=print):
     wynik = segmentuj_w_znaczniku(_wczytane[model], obraz, z)
     if not wynik.maska.any():
         raise BladSegmentacji("Model nie znalazl znamienia we wnetrzu znacznika")
-    log(f"Segmentacja {wynik.czas_s:.1f} s, maska {int((wynik.maska > 0).sum())} px")
+    log(f"Segmentacja {wynik.czas_s:.1f} s ({wynik.info.get('metoda', '')}), maska {int((wynik.maska > 0).sum())} px")
     return wynik.maska
 
 

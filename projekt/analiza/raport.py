@@ -154,17 +154,8 @@ OBJASNIENIA = [
          "nie pokrywa się z oryginałem. 0 = idealnie symetryczne (kryterium „A”)."),
         ("lab", "Kolor L*a*b*",
          "Średni kolor w przestrzeni CIE L*a*b*: L* – jasność (0 czarny … 100 biały), a* – oś zieleń (−) / "
-         "czerwień (+), b* – oś błękit (−) / żółć (+). Liczony osobno dla znamienia i dla pierścienia skóry wokół. "
-         "Kolor zależy od oświetlenia i automatyki aparatu, więc wartości bezwzględne między zdjęciami porównuje się "
-         "ostrożnie; różnica znamię–skóra na tym samym zdjęciu jest stabilniejsza."),
-        ("pierscien", "Pierścień skóry",
-         "Pas skóry od 2 do 4 mm od brzegu znamienia (odległość w mm na zdjęciu), z wyłączeniem folii znacznika. "
-         "Służy jako tło do porównania koloru – jest dość blisko, by mieć to samo oświetlenie, i dość daleko, "
-         "by nie łapać rozmytej krawędzi znamienia."),
-        ("de", "ΔE (znamię – skóra)",
-         "Różnica koloru CIE76: <span class='wzor'>ΔE = √(ΔL*² + Δa*² + Δb*²)</span> między średnim kolorem "
-         "znamienia i pierścienia skóry. Ok. 2,3 to próg ledwo zauważalnej różnicy; powyżej 10 kontrast jest "
-         "wyraźny."),
+         "czerwień (+), b* – oś błękit (−) / żółć (+). Średnia po pikselach maski znamienia. Kolor zależy od "
+         "oświetlenia i automatyki aparatu, więc wartości między zdjęciami porównuje się ostrożnie."),
     ]),
     ("Segmentacja znamienia", [
         ("seg", "PanDerm a adnotacja z CVAT",
@@ -228,7 +219,6 @@ def sekcje(w):
     Wspolne dla raportu HTML i aplikacji."""
     rej, zg, rgb = w["rejestracja"], w.get("zgodnosc"), w["pomiary_rgb"]
     ks, zr, nar = w["kontrola_skali"], w["zrodla"], w.get("narozniki", {})
-    r0, r1 = (f"{x:g}" for x in w["pierscien_mm"])
     wynik = []
     if zg:
         wynik.append(("Zgodność między modalnościami (badanie E1)",
@@ -288,8 +278,6 @@ def sekcje(w):
         ("kolistosc", "Kolistość", _f(rgb['kolistosc'], 3), "1 = koło; mniej = wydłużone lub nieregularny brzeg"),
         ("asym", "Asymetria (oś główna / prostopadła)", f"{_f(rgb['asymetria_os_glowna'], 3)} / {_f(rgb['asymetria_os_prostopadla'], 3)}", "część pola niepokryta po odbiciu (0 = symetryczne)"),
         ("lab", "Kolor L*a*b* znamienia", ", ".join(_f(x, 1) for x in rgb['lab_znamie']), "jasność, czerwień–zieleń, żółć–błękit"),
-        ("pierscien", "Kolor L*a*b* skóry wokół", ", ".join(_f(x, 1) for x in rgb['lab_skora']), f"pierścień {r0}–{r1} mm, bez folii"),
-        ("de", "ΔE (znamię – skóra)", _f(rgb['delta_e'], 1), "różnica koloru; > 10 = wyraźna"),
         ("skala", "Skala", f"{_f(rgb['mm_na_px'], 4)} mm/px", "rozmiar piksela zdjęcia w miejscu znamienia"),
     ]))
     return wynik
@@ -300,7 +288,6 @@ def zapisz(sciezka, w, obrazy):
     e = html.escape
     i, rej, zg, rgb = w["info"], w["rejestracja"], w.get("zgodnosc"), w["pomiary_rgb"]
     ks, zr = w["kontrola_skali"], w["zrodla"]
-    r0, r1 = (f"{x:g}" for x in w["pierscien_mm"])
     para = i.get("para")
     tytul = f"Para {para}" if para is not None else f"{i.get('zdjecie')} + {i.get('termowizja')}"
 
@@ -346,8 +333,8 @@ def zapisz(sciezka, w, obrazy):
     fiolet = "oznaczony w CVAT" if zg else "wykryty automatycznie"
     niebieskie = ", znamię z CVAT do porównania (niebieskie)" if w.get("segmentacja_vs_cvat") else ""
     czesci.append("<h2>Obrazy</h2><div class='siatka'>"
-                  + _img(obrazy["rgb"], f"Zdjęcie: znacznik i narożniki 0–7 (zielone), znamię z PanDerm (czerwone), pierścień skóry "
-                                        f"{r0}–{r1} mm do porównania koloru (żółty){niebieskie}")
+                  + _img(obrazy["rgb"], f"Zdjęcie: znacznik i narożniki 0–7 (zielone), znamię z PanDerm (czerwone)"
+                                        f"{niebieskie}")
                   + _img(obrazy["termal"], f"Termowizja (3×): znacznik {fiolet} na termowizji (fioletowy); przeniesione ze "
                                            f"zdjęcia: znacznik (zielony) i znamię (czerwone)"
                                            + ("; białe kreski = błąd rejestracji w narożnikach (CVAT)" if zg else ""))

@@ -1,6 +1,6 @@
 """
 Obrazy do raportu pary (BGR, uint8):
-    rgb                 zdjecie wokol znacznika: znacznik i narozniki, znamie, pierscien skory
+    rgb                 zdjecie wokol znacznika: znacznik i narozniki, znamie
     termal              termowizja 3x: znacznik oznaczony na termowizji i przeniesiony ze zdjecia, znamie
     nakladka            termowizja nalozona na zdjecie (50 %) z obrysami znacznika i znamienia
     nakladka_zblizenie  to samo w powiekszeniu wokol znamienia; termowizja bez wygladzania, wiec widac
@@ -13,7 +13,7 @@ import numpy as np
 from . import geometria as geo
 
 ZIELONY, CZERWONY, FIOLET = (0, 200, 0), (0, 0, 255), (255, 0, 255)
-ZOLTY, NIEBIESKI, BIALY, CZARNY = (0, 230, 255), (255, 160, 0), (255, 255, 255), (0, 0, 0)
+NIEBIESKI, BIALY, CZARNY = (255, 160, 0), (255, 255, 255), (0, 0, 0)
 
 
 def napis(img, tekst, xy, skala=0.6):
@@ -22,7 +22,7 @@ def napis(img, tekst, xy, skala=0.6):
 
 
 def brzegi(maska):
-    """Wszystkie brzegi maski (zewnetrzne i wewnetrzne, np. obie krawedzie pierscienia)."""
+    """Wszystkie brzegi maski (zewnetrzne i wewnetrzne)."""
     ks, _ = cv2.findContours(np.asarray(maska).astype(np.uint8), cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
     return [k[:, 0, :].astype(np.float64) for k in ks if len(k) >= 3]
 
@@ -82,7 +82,6 @@ def rysuj(a):
     ob = {}
     pr = a.przeniesione
     kontury_rgb = geo.kontury(a.maska_znamie)
-    pierscien_rgb = a.wyniki["pomiary_rgb"].get("_pierscien")
     kontury_cvat = geo.kontury(a.wzorzec["maska_znamie_rgb"]) if a.wzorzec is not None else []
 
     # 1. zdjecie: kadr wokol znacznika
@@ -91,8 +90,6 @@ def rysuj(a):
     k = cv2.resize(a.rgb[y0:y1, x0:x1], None, fx=sk, fy=sk, interpolation=cv2.INTER_AREA)
     tr = lambda p: (np.asarray(p, np.float64) - [x0, y0]) * sk
     _linie(k, [a.narozniki_rgb], tr, ZIELONY, 2)
-    if pierscien_rgb is not None:
-        _linie(k, brzegi(pierscien_rgb), tr, ZOLTY, 1)
     _linie(k, kontury_cvat, tr, NIEBIESKI, 1)
     _linie(k, kontury_rgb, tr, CZERWONY, 2)
     for i, q in enumerate(tr(a.narozniki_rgb)):
