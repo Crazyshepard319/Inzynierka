@@ -15,6 +15,7 @@ Etapy (analiza/system.py):
   5. pomiary: wymiary w mm i kolor znamienia, kontrola skali; ocena wzgledem CVAT (badanie E1,
      segmentacja PanDerm vs adnotacja)
   6. raport: wyniki/wyniki_obu/para_N/raport.html + metryki.json + obrazy PNG
+Gdy para sie nie uda, powod trafia do wyniki/wyniki_obu/para_N/blad.txt (czyta go raport_zbiorczy.py).
 """
 import argparse
 import sys
@@ -22,6 +23,7 @@ import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from analiza.dane import INZ                                # noqa: E402
 from analiza.system import Analiza, BladEtapu, analizuj   # noqa: E402
 
 
@@ -44,21 +46,30 @@ class _Log:
         pass
 
 
+def _zapisz_blad(plik, tekst):
+    plik.parent.mkdir(parents=True, exist_ok=True)
+    plik.write_text(tekst, encoding="utf-8")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Potok analizy par RGB - termowizja")
     ap.add_argument("pary", nargs="+", help="numery par, np. 1 3 10-20")
     a = ap.parse_args()
     for n in numery(a.pary):
         print(f"\n=== Para {n} ===")
+        blad = INZ / "wyniki" / "wyniki_obu" / f"para_{n}" / "blad.txt"     # powod dla raport_zbiorczy.py
         try:
             an = analizuj(Analiza.z_pary(n), log=_Log())
             sciezka = an.zapisz_raport()
         except BladEtapu as e:
             print(f"Para {n}: BLAD - {e}")
+            _zapisz_blad(blad, str(e))
             continue
-        except Exception:
+        except Exception as e:
             traceback.print_exc()
+            _zapisz_blad(blad, f"{type(e).__name__}: {e}")
             continue
+        blad.unlink(missing_ok=True)
         w = an.wyniki
         zg, rgb, ks, seg = w["zgodnosc"], w["pomiary_rgb"], w["kontrola_skali"], w["segmentacja_vs_cvat"]
         print(f"Para {n}: model {w['rejestracja'].get('model')}; znamie {rgb['pole_mm2']:.2f} mm2, "
