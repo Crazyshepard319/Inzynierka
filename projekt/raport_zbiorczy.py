@@ -44,6 +44,16 @@ MIARY = [
     ("obrys_pola", "Stosunek pól obrysu (przeniesiony / CVAT)", "", ("zgodnosc", "obrys", "stosunek_pol"), 3, "rej"),
     ("otwor_dice", "Dice otworu znacznika", "", ("zgodnosc", "otwor", "dice"), 3, "rej"),
     ("otwor_hd95", "HD95 otworu znacznika", "mm", ("zgodnosc", "otwor", "hd95_mm"), 2, "rej"),
+    ("e2_obrys_dice", "Dice folii znacznika", "", ("zgodnosc_modalnosci", "obrys", "dice"), 3, "e2"),
+    ("e2_obrys_iou", "IoU folii znacznika", "", ("zgodnosc_modalnosci", "obrys", "iou"), 3, "e2"),
+    ("e2_obrys_hd95", "HD95 folii znacznika", "mm", ("zgodnosc_modalnosci", "obrys", "hd95_mm"), 2, "e2"),
+    ("e2_obrys_assd", "ASSD folii znacznika", "mm", ("zgodnosc_modalnosci", "obrys", "assd_mm"), 2, "e2"),
+    ("e2_otwor_dice", "Dice otworu (ROI)", "", ("zgodnosc_modalnosci", "otwor", "dice"), 3, "e2"),
+    ("e2_otwor_hd95", "HD95 otworu (ROI)", "mm", ("zgodnosc_modalnosci", "otwor", "hd95_mm"), 2, "e2"),
+    ("e2_otwor_srodki", "Przesunięcie środków otworu", "mm", ("zgodnosc_modalnosci", "otwor", "przesuniecie_srodkow_mm"),
+     2, "e2"),
+    ("e2_otwor_pola", "Stosunek pól otworu (zdjęcie → T / U-Net)", "", ("zgodnosc_modalnosci", "otwor", "stosunek_pol"),
+     3, "e2"),
     ("zg_rgb", "Zgodność znacznika z wzorcem Π – zdjęcie", "", ("rejestracja", "zgodnosc_rgb"), 3, "znacznik"),
     ("zg_ter", "Zgodność znacznika z wzorcem Π – termowizja", "", ("rejestracja", "zgodnosc_termal"), 3, "znacznik"),
     ("nar_cvat", "Narożniki automatyczne vs CVAT (zdjęcie)", "mm", ("narozniki", "rgb_blad_vs_cvat_mm"), 2, "znacznik"),
@@ -51,6 +61,14 @@ MIARY = [
      ("kontrola_skali", "pole_otworu_przeniesionego_mm2"), 1, "znacznik"),
     ("otwor_stos", "Pole otworu przeniesionego / 289 mm²", "", ("kontrola_skali", "stosunek_pol_otworu"), 3, "znacznik"),
     ("mm_px_ter", "Rozmiar piksela termowizji na skórze", "mm", ("kontrola_skali", "mm_na_px_termal"), 3, "znacznik"),
+    ("unet_dice", "U-Net – Dice", "", ("segmentacja_termal_vs_cvat", "unet", "dice"), 3, "unet"),
+    ("unet_iou", "U-Net – IoU", "", ("segmentacja_termal_vs_cvat", "unet", "iou"), 3, "unet"),
+    ("unet_hd95", "U-Net – HD95", "mm", ("segmentacja_termal_vs_cvat", "unet", "hd95_mm"), 2, "unet"),
+    ("unet_assd", "U-Net – ASSD", "mm", ("segmentacja_termal_vs_cvat", "unet", "assd_mm"), 2, "unet"),
+    ("klas_dice", "Detektor klasyczny – Dice", "", ("segmentacja_termal_vs_cvat", "klasyczny", "dice"), 3, "unet"),
+    ("klas_iou", "Detektor klasyczny – IoU", "", ("segmentacja_termal_vs_cvat", "klasyczny", "iou"), 3, "unet"),
+    ("klas_hd95", "Detektor klasyczny – HD95", "mm", ("segmentacja_termal_vs_cvat", "klasyczny", "hd95_mm"), 2, "unet"),
+    ("klas_assd", "Detektor klasyczny – ASSD", "mm", ("segmentacja_termal_vs_cvat", "klasyczny", "assd_mm"), 2, "unet"),
     ("seg_dice", "Dice", "", ("segmentacja_vs_cvat", "dice"), 3, "seg"),
     ("seg_iou", "IoU", "", ("segmentacja_vs_cvat", "iou"), 3, "seg"),
     ("seg_hd95", "HD95", "mm", ("segmentacja_vs_cvat", "hd95_mm"), 2, "seg"),
@@ -71,7 +89,11 @@ MIARY = [
      "znamie"),
 ]
 GRUPY = {"rej": "Rejestracja (badanie E1): narożniki i obrys znacznika z CVAT, zdjęcie → T → termowizja",
+         "e2": "Zgodność masek między modalnościami (badanie E2): znacznik ze zdjęcia przeniesiony przez T "
+               "a znacznik z U-Netu na termowizji (bez CVAT)",
          "znacznik": "Znacznik: wykrycie, narożniki automatyczne, kontrola skali",
+         "unet": "Segmentacja znacznika na termowizji względem CVAT: U-Net (M3, walidacja krzyżowa) "
+                 "i detektor klasyczny z rejestracji",
          "seg": "Segmentacja znamienia: PanDerm względem obrysu z CVAT (zdjęcie)",
          "znamie": "Parametry znamion (opisowo)"}
 OPIS = {m[0]: m for m in MIARY}
@@ -138,6 +160,8 @@ def ostrzezenia(w):
         o.append(f"segmentacja niezgodna z CVAT (Dice {_l(w['seg_dice'], 2)})")
     elif w["seg_dice"] is not None and w["seg_dice"] < 0.7:
         o.append(f"słaba segmentacja (Dice {_l(w['seg_dice'], 2)})")
+    if w["e2_obrys_dice"] is not None and w["e2_obrys_dice"] < 0.85:
+        o.append(f"niska zgodność masek między modalnościami (E2, Dice {_l(w['e2_obrys_dice'], 2)})")
     if w["otwor_stos"] is not None and abs(w["otwor_stos"] - 1) > 0.1:
         o.append(f"kontrola skali: pole otworu {_l(100 * w['otwor_stos'], 0)}% wzorca")
     return o
@@ -171,7 +195,12 @@ def podsumowanie(wiersze, odrzucone, s):
     modele = {}
     for w in wiersze:
         modele[w["model"]] = modele.get(w["model"], 0) + 1
+    med = lambda k: float(np.median(s[k]["wartosci"])) if k in s and s[k]["wartosci"].size else None
+    e2 = s["e2_obrys_dice"]["wartosci"] if "e2_obrys_dice" in s else np.array([])
     return {"n": n, "ok": len(wiersze), "odrzucone": len(odrzucone),
+            "e2_mediana": med("e2_obrys_dice"), "e2_otwor_mediana": med("e2_otwor_dice"),
+            "e2_ge09": int((e2 >= 0.9).sum()), "n_e2": int(e2.size),
+            "unet_mediana": med("unet_dice"), "klas_mediana": med("klas_dice"),
             "tre_mediana": float(np.median(tre)) if tre.size else None,
             "tre_le1": int((tre <= 1).sum()), "tre_le2": int((tre <= 2).sum()), "n_tre": int(tre.size),
             "dice_srednia": float(dice.mean()) if dice.size else None,
@@ -359,13 +388,19 @@ def zapisz_tex(s, pod, kat):
     tabele = [
         ("rej", "Jakość rejestracji (badanie E1): narożniki i obrys znacznika zaznaczone ręcznie na zdjęciu, "
                 "przeniesione macierzą T, względem zaznaczonych ręcznie na termowizji", "tab:e1"),
+        ("e2", "Zgodność masek znacznika między modalnościami (badanie E2): maska ze zdjęcia przeniesiona macierzą T "
+               "względem maski z modelu U-Net na termowizji", "tab:e2"),
         ("znacznik", "Wykrycie znacznika, narożniki wyznaczane automatycznie i kontrola skali", "tab:znacznik"),
+        ("unet", "Segmentacja znacznika na termowizji względem adnotacji z CVAT: U-Net (walidacja krzyżowa po "
+                 "znamionach) i detektor klasyczny z rejestracji", "tab:unet"),
         ("seg", "Segmentacja znamienia modelem PanDerm względem obrysu z CVAT", "tab:segmentacja"),
         ("znamie", "Parametry znamion zmierzone przez system", "tab:znamiona"),
     ]
     o = [f"% Tabele z raport_zbiorczy.py ({datetime.now():%d.%m.%Y %H:%M}); wymagaja \\usepackage{{booktabs}}.",
          f"% Pary przeanalizowane: {pod['ok']} z {pod['n']}.", ""]
     for grupa, podpis, etykieta in tabele:
+        if not any(m[5] == grupa and m[0] in s for m in MIARY):
+            continue                                       # brak danych tej grupy (np. stare metryki.json)
         o += ["\\begin{table}[htbp]", "\\centering",
               f"\\caption{{{_tex(podpis)} ($n = {pod['ok']}$ par)}}", f"\\label{{{etykieta}}}",
               "\\begin{tabular}{lrrrr}", "\\toprule",
@@ -417,6 +452,13 @@ def zapisz_html(wiersze, odrzucone, s, pod, kat):
     if p["tre_mediana"] is not None:
         czesci.append(f"<li>Rejestracja (E1): mediana TRE <b>{_l(p['tre_mediana'], 2)} mm</b>; TRE ≤ 1 mm na "
                       f"{p['tre_le1']}/{p['n_tre']} parach, ≤ 2 mm na {p['tre_le2']}/{p['n_tre']}.</li>")
+    if p.get("e2_mediana") is not None:
+        czesci.append(f"<li>Zgodność masek między modalnościami (E2, zdjęcie → T a U-Net): Dice folii mediana "
+                      f"<b>{_l(p['e2_mediana'], 3)}</b>, Dice otworu (ROI) mediana <b>{_l(p['e2_otwor_mediana'], 3)}</b>; "
+                      f"Dice folii ≥ 0,9 na {p['e2_ge09']}/{p['n_e2']} parach.</li>")
+    if p.get("unet_mediana") is not None:
+        czesci.append(f"<li>Segmentacja znacznika na termowizji vs CVAT: U-Net Dice mediana <b>{_l(p['unet_mediana'], 3)}</b>"
+                      f", detektor klasyczny {_l(p['klas_mediana'], 3)}.</li>")
     if p["dice_srednia"] is not None:
         czesci.append(f"<li>Segmentacja PanDerm vs CVAT: Dice średnio <b>{_l(p['dice_srednia'], 3)}</b>, mediana "
                       f"{_l(p['dice_mediana'], 3)}; Dice ≥ 0,8 na {p['dice_ge08']}/{p['n_dice']}, &lt; 0,5 na "
@@ -437,6 +479,8 @@ def zapisz_html(wiersze, odrzucone, s, pod, kat):
 
     czesci.append("<h2>Statystyki</h2>")
     for grupa, tytul in GRUPY.items():
+        if not any(m[5] == grupa and m[0] in s for m in MIARY):
+            continue
         czesci.append(f"<h3>{e(tytul)}</h3><table><tr><th>Miara</th><th>n</th><th>Średnia ± odch.</th>"
                       "<th>Mediana</th><th>Min</th><th>Maks</th></tr>")
         for klucz, opis, jedn, _, m, g in MIARY:
@@ -459,8 +503,14 @@ def zapisz_html(wiersze, odrzucone, s, pod, kat):
     if "seg_dice" in s:
         v, pary = kolumna("seg_dice")
         czesci.append(svg_histogram(v, pary, "Segmentacja PanDerm względem CVAT", "Dice", 0.05))
+    if "e2_otwor_dice" in s:
+        v, pary = kolumna("e2_otwor_dice")
+        czesci.append(svg_histogram(v, pary, "Zgodność ROI między modalnościami (E2): otwór znacznika", "Dice", 0.01,
+                                    (0.8, 1.0)))
     etykiety = {"tre_sr": "TRE średni", "tre_max": "TRE największy", "nar_cvat": "Narożniki auto vs CVAT",
                 "obrys_hd95": "HD95 obrysu znacznika", "otwor_hd95": "HD95 otworu znacznika",
+                "e2_obrys_hd95": "HD95 folii (E2)", "e2_otwor_hd95": "HD95 otworu (E2)",
+                "unet_hd95": "HD95 U-Net (vs CVAT)", "klas_hd95": "HD95 detektor klas. (vs CVAT)",
                 "seg_hd95": "HD95 znamienia (vs CVAT)"}
     serie = [(etykiety[k], *kolumna(k)) for k in etykiety if k in s]
     if serie:
@@ -480,7 +530,8 @@ def zapisz_html(wiersze, odrzucone, s, pod, kat):
                   "kółka = wartości odstające; za prawą krawędzią para z największą wartością poza osią "
                   "(w nawiasie liczba pozostałych).</p>")
 
-    kol = ["tre_sr", "tre_max", "obrys_dice", "otwor_dice", "nar_cvat", "zg_rgb", "zg_ter", "otwor_stos",
+    kol = ["tre_sr", "tre_max", "obrys_dice", "otwor_dice", "e2_obrys_dice", "e2_otwor_dice", "unet_dice",
+           "nar_cvat", "zg_rgb", "zg_ter", "otwor_stos",
            "seg_dice", "seg_hd95", "seg_pola", "pole", "srednica", "px_ter"]
     czesci.append("<h2>Wszystkie pary</h2><p class='uwaga'>Posortowane od największego błędu rejestracji; kliknij "
                   "nagłówek, żeby posortować inaczej. Numer pary otwiera jej raport. Wszystkie kolumny: pary.csv.</p>"
@@ -517,7 +568,8 @@ def _krotko(k):
             "otwor_dice": "Dice otworu", "nar_cvat": "Narożniki vs CVAT [mm]", "zg_rgb": "Zgodn. Π zdjęcie",
             "zg_ter": "Zgodn. Π termow.", "otwor_stos": "Otwór / 289", "seg_dice": "Dice znamienia",
             "seg_hd95": "HD95 znamienia [mm]", "seg_pola": "Pole PanDerm / CVAT", "pole": "Pole [mm²]",
-            "srednica": "Średnica [mm]", "px_ter": "Piksele termowizji"}.get(k, k)
+            "srednica": "Średnica [mm]", "px_ter": "Piksele termowizji", "e2_obrys_dice": "E2 Dice folii",
+            "e2_otwor_dice": "E2 Dice otworu", "unet_dice": "U-Net Dice"}.get(k, k)
 
 
 def main():
@@ -537,6 +589,12 @@ def main():
     print(f"Pary: {pod['ok']}/{pod['n']} przeanalizowane, odrzucone: {[n for n, _ in odrzucone]}")
     if pod["tre_mediana"] is not None:
         print(f"TRE: mediana {pod['tre_mediana']:.2f} mm, <= 2 mm na {pod['tre_le2']}/{pod['n_tre']}")
+    if pod["e2_mediana"] is not None:
+        print(f"E2 (zdjecie -> T vs U-Net): Dice folii mediana {pod['e2_mediana']:.3f}, "
+              f"Dice otworu mediana {pod['e2_otwor_mediana']:.3f}")
+    if pod["unet_mediana"] is not None:
+        print(f"Znacznik na termowizji vs CVAT: U-Net Dice mediana {pod['unet_mediana']:.3f}, "
+              f"detektor klasyczny {pod['klas_mediana']:.3f}")
     if pod["dice_srednia"] is not None:
         print(f"Segmentacja: Dice srednio {pod['dice_srednia']:.3f}, mediana {pod['dice_mediana']:.3f}")
     print(f"-> {kat / 'raport_zbiorczy.html'}")

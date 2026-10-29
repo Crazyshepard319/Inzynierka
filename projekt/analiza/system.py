@@ -10,13 +10,20 @@ Wszystko jest wyznaczane automatycznie; adnotacje z CVAT sluza tylko do oceny wy
   3. Segmentacja    ustaw_narozniki()    wzorzec Π 35 x 26 mm dopasowany do maski znacznika z rejestracji
                                          -> 8 naroznikow -> homografia px -> mm (skala)
                     segmentuj_znamie()   znamie na zdjeciu: PanDerm (model M1) we wnetrzu znacznika
+                    segmentuj_znacznik_termal()  znacznik na termowizji: U-Net (model M3), niezaleznie od
+                                         rejestracji (modele_segmentacja/unet_termal)
   4. Przeniesienie  przenies()           znamie, obrys i otwor znacznika: zdjecie -> termowizja (T)
-  5. Pomiary        zmierz()             wymiary w mm i kolor znamienia, kontrola skali; gdy sa adnotacje:
-                                         zgodnosc z CVAT (badanie E1) i segmentacji PanDerm z CVAT
-  6. Raport         zapisz_raport()      raport.html + metryki.json + obrazy PNG
+  5. Pomiary        zmierz()             wymiary w mm i kolor znamienia, kontrola skali; zgodnosc masek
+                                         miedzy modalnosciami (badanie E2: znacznik ze zdjecia przez T vs
+                                         U-Net na termowizji); gdy sa adnotacje: zgodnosc z CVAT (badanie E1)
+                                         oraz segmentacji PanDerm i U-Netu z CVAT; piksele termowizji objete
+                                         przeniesionym znamieniem: x, y i surowa intensywnosc z nagrania .SEQ
+  6. Raport         zapisz_raport()      raport.html + metryki.json + obrazy PNG + piksele_znamienia_termal.csv;
+                                         wpis w bazie SQLite (analiza/baza.py, dane/baza.sqlite)
 
 Temperatury (mapa °C z SEQ, dane/pary/N/termal_C.npy) nie sa czescia raportu - funkcja
-pomiary.parametry_termiczne zostaje do ewentualnego uzycia.
+pomiary.parametry_termiczne zostaje do ewentualnego uzycia. Intensywnosc pikseli znamienia to surowa wartosc
+detektora z nagrania .SEQ (dane/pary/N/termal_surowe.npy albo odczyt nagrania przez flirpy), nie temperatura.
 """
 import contextlib
 import importlib.util
@@ -38,13 +45,14 @@ if str(PROJEKT) not in sys.path:
 import dopasowanie3 as dop                                  # noqa: E402
 import import_cvat as cvat                                  # noqa: E402
 from . import geometria as geo, miary, obrazy, pomiary, raport   # noqa: E402
-from .dane import DANE, INZ, PARY, imread, info_pary, wzorzec_pary   # noqa: E402
+from .dane import DANE, INZ, PARY, imread, info_pary, intensywnosc_surowa, wzorzec_pary   # noqa: E402
 
 GESTOSC = 4      # przeniesione obszary w siatce termowizji 4x gestszej (dokladnosc pola ~1%)
 POLE_OTWORU_MM2 = (dop.BELKA - 2 * dop.PASEK) * (dop.RAMIE - dop.PASEK)     # 17 x 17 = 289 mm2
 OPIS_NAROZNIKOW = "automatycznie (wzorzec Π dopasowany do maski znacznika z rejestracji)"
 OPIS_ZNAMIENIA = "PanDerm (model M1)"
 ETAPY = ("wejscie", "rejestracja", "segmentacja", "przeniesienie", "pomiary", "raport")
+PLIK_PIKSELI = "piksele_znamienia_termal.csv"     # x;y;ulamek;w_masce;intensywnosc (pomiary.zapisz_piksele)
 
 
 class BladEtapu(RuntimeError):
@@ -153,6 +161,10 @@ class Analiza:
         self.narozniki_rgb = self.H_rgb = self.narozniki_termal = self.H_termal = None
         self.dopasowanie_naroznikow = {}
         self.maska_znamie = None
+        self.maska_znacznika_termal_unet, self.model_termal = None, None   # znacznik na termowizji (U-Net)
+        self._maski_e2 = None
+        self.intensywnosc, self.zrodlo_intensywnosci, self._intensywnosc_wczytana = None, None, False
+        self.piksele = None                                  # piksele znamienia na termowizji (zmierz)
         self.przeniesione, self.wyniki, self.ostatnie_obrazy = None, None, {}
 
     @classmethod
@@ -164,7 +176,8 @@ class Analiza:
     def stan(self):
         """Ktore etapy sa wykonane (dla aplikacji)."""
         return {"wejscie": True, "rejestracja": self.M is not None,
-                "segmentacja": self.maska_znamie is not None and self.H_rgb is not None,
+                "segmentacja": (self.maska_znamie is not None and self.H_rgb is not None
+                                and self.maska_znacznika_termal_unet is not None),
                 "przeniesienie": self.przeniesione is not None, "pomiary": self.wyniki is not None}
 
     @property
@@ -176,6 +189,8 @@ class Analiza:
         braki = {"rejestracja": (self.M is None, "Najpierw wykonaj rejestrację (krok 2)."),
                  "narozniki": (self.H_rgb is None, "Najpierw wyznacz narożniki znacznika (krok 3)."),
                  "znamie": (self.maska_znamie is None, "Najpierw wyznacz znamię (krok 3)."),
+                 "znacznik_termal": (self.maska_znacznika_termal_unet is None,
+                                     "Najpierw wyznacz znacznik na termowizji (krok 3)."),
                  "przeniesienie": (self.przeniesione is None, "Najpierw przenieś obszary na termowizję (krok 4)."),
                  "pomiary": (self.wyniki is None, "Najpierw policz pomiary (krok 5).")}
         for c in co:
@@ -294,6 +309,35 @@ class Analiza:
             raise BladEtapu(f"Nie można otworzyć maski: {wyj}")
         return self.ustaw_znamie(maska)
 
+    def segmentuj_znacznik_termal(self, log=None):
+        """Znacznik (folia) na termowizji modelem U-Net M3 (cv2.dnn + ONNX, bez PyTorch). Model nie bierze
+        udzialu w rejestracji, wiec jego maska jest niezaleznym punktem odniesienia dla badania E2. Para z bazy:
+        model foldu, w ktorym para byla testowa (nie byla w treningu); inne obrazy: model ze wszystkich par."""
+        from modele_segmentacja.unet_termal import wczytaj
+        try:
+            model, opis = wczytaj(self.info.get("fold"))
+        except FileNotFoundError as e:
+            raise BladEtapu(str(e)) from None
+        maska = model.segmentuj(self.termal)
+        if not maska.any():
+            raise BladEtapu("U-Net nie znalazł znacznika na termowizji.")
+        self.maska_znacznika_termal_unet, self.model_termal = maska, opis
+        self.wyniki = None
+        if log is not None:
+            log.write(f"Znacznik na termowizji: {opis}, {int((maska > 0).sum())} px\n")
+        return maska
+
+    def wczytaj_intensywnosc(self):
+        """Surowe wartosci detektora z nagrania .SEQ, piksel w piksel jak obraz termowizyjny (dane.intensywnosc_surowa);
+        None, gdy nie ma nagrania albo nie pasuje do obrazu (powod w zrodlo_intensywnosci)."""
+        if not self._intensywnosc_wczytana:
+            I, zrodlo = intensywnosc_surowa(self.ter_path, self.para, self.info.get("termal_nagranie"))
+            if I is not None and I.shape != self.termal.shape[:2]:
+                I, zrodlo = None, (f"nagranie {zrodlo} ma {I.shape[1]}×{I.shape[0]} px, a obraz termowizyjny "
+                                   f"{self.termal.shape[1]}×{self.termal.shape[0]} px")
+            self.intensywnosc, self.zrodlo_intensywnosci, self._intensywnosc_wczytana = I, zrodlo, True
+        return self.intensywnosc
+
     # ── 4. przeniesienie obszarow ───────────────────────────────────────────
     def przenies(self):
         """Znamie, obrys i otwor znacznika ze zdjecia na termowizje (przez T)."""
@@ -310,6 +354,23 @@ class Analiza:
         return self.przeniesione
 
     # ── 5. pomiary i zgodnosc ───────────────────────────────────────────────
+    def zgodnosc_modalnosci(self):
+        """Badanie E2 (bez adnotacji): folia znacznika wykryta na zdjeciu (detektor z rejestracji) przeniesiona
+        przez T (A) a folia z U-Netu na termowizji (B), oraz otwory (wnetrza) obu masek - ROI, w ktorym lezy
+        znamie. Siatka termowizji 4x gestsza; mm z homografii narozników termowizji."""
+        if self.maska_znacznika_termal_unet is None or self.maska_znacznika_rgb is None:
+            return None
+        ks = self.termal.shape[:2]
+        A = geo.przenies_maske(self.maska_znacznika_rgb, self.M, ks, GESTOSC, uproszczenie=1.0)   # 1 px zdjecia
+        B = geo.powieksz_maske(self.maska_znacznika_termal_unet, GESTOSC)
+        wa, wb = geo.wnetrze_znacznika(A, GESTOSC), geo.wnetrze_znacznika(B, GESTOSC)
+        self._maski_e2 = (A, B, wa, wb)                     # do obrazu w raporcie (obrazy.py)
+        s = geo.mm_na_px(self.H_termal, self.narozniki_termal.mean(0)) / GESTOSC
+        return {"model_termal": self.model_termal,
+                "obrys": miary.zgodnosc_masek(A, B, s), "otwor": miary.zgodnosc_masek(wa, wb, s),
+                "pole_otworu_przeniesionego_mm2": float(wa.sum() * s * s),
+                "pole_otworu_unet_mm2": float(wb.sum() * s * s)}
+
     def zmierz(self):
         self._wymagaj("przeniesienie")
         p_rgb = pomiary.parametry_rgb(self.rgb, self.maska_znamie, self.H_rgb)
@@ -325,10 +386,18 @@ class Analiza:
             "pole_otworu_wzorzec_mm2": POLE_OTWORU_MM2,
         }
         kontrola["stosunek_pol_otworu"] = kontrola["pole_otworu_przeniesionego_mm2"] / kontrola["pole_otworu_termal_mm2"]
-        w = {"info": dict(self.info), "zrodla": {"narozniki": OPIS_NAROZNIKOW, "znamie": OPIS_ZNAMIENIA},
+        I = self.wczytaj_intensywnosc()                      # piksele znamienia na termowizji: x, y, intensywnosc
+        self.piksele = pomiary.piksele_znamienia(ul, I) if I is not None else None
+        piksele = {"zrodlo": self.zrodlo_intensywnosci, "prog_ulamka": pomiary.PROG_PIKSELA}
+        if self.piksele is not None:
+            piksele.update(pomiary.statystyki_intensywnosci(self.piksele))
+        w = {"info": dict(self.info),
+             "zrodla": {"narozniki": OPIS_NAROZNIKOW, "znamie": OPIS_ZNAMIENIA,
+                        "znacznik_termal": self.model_termal or "-"},
              "rejestracja": self.rej, "narozniki": self.dopasowanie_naroznikow,
              "pomiary_rgb": p_rgb, "kontrola_skali": kontrola,
-             "zgodnosc": None, "segmentacja_vs_cvat": None}
+             "zgodnosc_modalnosci": self.zgodnosc_modalnosci(), "piksele_termal": piksele,
+             "zgodnosc": None, "segmentacja_vs_cvat": None, "segmentacja_termal_vs_cvat": None}
         wz = self.wzorzec
         if wz is not None:                                   # ocena: wzorzec z CVAT
             # E1 (sama rejestracja): narozniki z CVAT na zdjeciu przeniesione przez T vs narozniki z CVAT na termowizji
@@ -348,6 +417,13 @@ class Analiza:
             pole_cvat = pomiary.parametry_rgb(self.rgb, wz["maska_znamie_rgb"], self.H_rgb)["pole_mm2"]
             w["segmentacja_vs_cvat"]["pole_cvat_mm2"] = pole_cvat
             w["narozniki"]["rgb_blad_vs_cvat_mm"] = miary.tre(self.narozniki_rgb, wz["narozniki_rgb"], wz["H_rgb"])["tre_srednie"]
+            if wz["maska_znacznik_termal"] is not None and wz["maska_znacznik_termal"].shape == ks:
+                cvat_t = wz["maska_znacznik_termal"] > 0       # ocena segmentacji znacznika na termowizji (M3)
+                w["segmentacja_termal_vs_cvat"] = {
+                    "unet": (miary.zgodnosc_masek(self.maska_znacznika_termal_unet > 0, cvat_t, s_wz)
+                             if self.maska_znacznika_termal_unet is not None else None),
+                    "klasyczny": (miary.zgodnosc_masek(self.maska_znacznika_termal > 0, cvat_t, s_wz)
+                                  if self.maska_znacznika_termal is not None else None)}
         self.wyniki = w
         return w
 
@@ -357,7 +433,7 @@ class Analiza:
         return obrazy.rysuj(self)
 
     def zapisz_raport(self, folder=None):
-        """raport.html, metryki.json i obrazy PNG w folderze wynikow; zwraca sciezke raportu."""
+        """raport.html, metryki.json, obrazy PNG i piksele_znamienia_termal.csv w folderze wynikow; zwraca sciezke raportu."""
         if self.wyniki is None:
             self.zmierz()
         kat = Path(folder) if folder else self.folder
@@ -367,9 +443,24 @@ class Analiza:
             dop.imwrite(kat / f"{nazwa}.png", img)
         (kat / "metryki.json").write_text(json.dumps(bez_tablic(self.wyniki), indent=1, ensure_ascii=False),
                                           encoding="utf-8")
+        if self.piksele is not None:
+            pomiary.zapisz_piksele(kat / PLIK_PIKSELI, self.piksele)
+        else:
+            (kat / PLIK_PIKSELI).unlink(missing_ok=True)     # nieaktualny plik z poprzedniej analizy
         sciezka = kat / "raport.html"
         raport.zapisz(sciezka, self.wyniki, ob)
+        self.zapisz_w_bazie(folder=kat)
         return sciezka
+
+    def zapisz_w_bazie(self, status="ok", blad=None, folder=None):
+        """Wpis analizy (i jej miar) w bazie SQLite; blad bazy nie przerywa analizy (komunikat na stderr)."""
+        try:
+            from . import baza
+            with baza.Baza() as b:
+                return b.zapisz_analize(self, status=status, blad=blad, folder=folder)
+        except Exception as e:                                   # noqa: BLE001
+            print(f"[baza] nie zapisano analizy: {type(e).__name__}: {e}", file=sys.stderr)
+            return None
 
 
 def analizuj(a, log=None):
@@ -377,6 +468,27 @@ def analizuj(a, log=None):
     a.rejestruj(log)
     a.ustaw_narozniki()
     a.segmentuj_znamie(log)
+    a.segmentuj_znacznik_termal(log)
+    a.przenies()
+    a.zmierz()
+    return a
+
+
+def analizuj_z_zapisanych(a, log=None):
+    """Jak analizuj(), ale z zapisana rejestracja (wyniki/wyniki_dopasowania/<para>) i zapisana maska PanDerm
+    (<folder wynikow>/maska_znamie_panderm.png), gdy sa - bez PyTorch i bez liczenia rejestracji od nowa
+    (potok_pary.py --z_zapisanych: przeliczenie pomiarow i raportow po zmianach w kodzie)."""
+    try:
+        a.wczytaj_rejestracje()
+    except BladEtapu:
+        a.rejestruj(log)
+    a.ustaw_narozniki()
+    m = imread(a.folder / "maska_znamie_panderm.png", cv2.IMREAD_GRAYSCALE)
+    if m is not None and m.shape == a.rgb.shape[:2] and m.any():
+        a.ustaw_znamie(m)
+    else:
+        a.segmentuj_znamie(log)
+    a.segmentuj_znacznik_termal(log)
     a.przenies()
     a.zmierz()
     return a

@@ -1,0 +1,97 @@
+% =====================================================================
+% Dodatek A – Instrukcja użytkownika (WZÓR, ok. 2 strony)
+% Wstaw po \appendix. Zrzuty ekranu do wykonania – lista w materialy/07_plan_dodatki_streszczenie_skroty.md.
+% Plan i zwroty: materialy/07_plan_dodatki_streszczenie_skroty.md.
+% =====================================================================
+
+\chapter{Instrukcja użytkownika}
+\label{app:instrukcja}
+
+Instrukcja opisuje analizę pary obrazów zmiany skórnej w aplikacji okienkowej systemu. Instalację środowisk opisano w dokumentacji technicznej (Dodatek~\ref{app:dokumentacja}).
+
+\section{Uruchomienie}
+
+Aplikację uruchamia się w systemie Windows poleceniem:
+\begin{center}
+\texttt{inzynierka\textbackslash Scripts\textbackslash python.exe projekt\textbackslash aplikacja.py}
+\end{center}
+wydanym w folderze głównym projektu. Segmentacja znamienia wymaga zainstalowanego środowiska modeli; pozostałe etapy działają bez niego.
+
+\section{Przygotowanie obrazów}
+
+Przed wykonaniem zdjęć należy nakleić znacznik $\Pi$ tak, aby znamię znajdowało się między jego ramionami, w otworze znacznika. Znacznik musi w całości mieścić się w kadrze zarówno telefonu, jak i kamery termowizyjnej. Zdjęcie należy wykonać możliwie prostopadle do skóry, bez lampy błyskowej i bez silnych odblasków na folii. Z kamery termowizyjnej zapisuje się nagranie .SEQ; aby system zapisał intensywność pikseli znamienia, obraz termowizyjny (JPG) i nagranie muszą mieć tę samą nazwę i leżeć w tym samym folderze. Dla par ze zbioru nagrania są przypisane automatycznie.
+
+\section{Analiza pary krok po kroku}
+
+Okno aplikacji (rys.~\ref{fig:interfejs}) składa się z paska sześciu etapów, panelu sterowania po lewej stronie, podglądów obrazów po prawej oraz paska stanu z dziennikiem zdarzeń. Kółko myszy powiększa podgląd, przeciąganie przesuwa obraz, a dwukrotne kliknięcie przywraca widok początkowy. Przyciski etapów, których nie można jeszcze wykonać, są nieaktywne. Kolejne kroki analizy przedstawiono w tabeli~\ref{tab:instrukcja-kroki}. Wszystkie etapy można też wykonać jednym poleceniem \emph{Wykonaj wszystkie etapy} w zakładce \emph{1. Dane}; po jego zakończeniu aplikacja przechodzi do zakładki raportu.
+
+\begin{table}[!ht]
+  \centering
+  \caption{Analiza pary obrazów w aplikacji}
+  \label{tab:instrukcja-kroki}
+  \footnotesize
+  \begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{2.3cm} X X}
+    \toprule
+    Zakładka & Czynność użytkownika & Wynik \\
+    \midrule
+    1. Dane & wybrać \emph{Para z bazy}, numer pary (przyciski ze strzałkami zmieniają parę) i kliknąć \emph{Wczytaj parę}; albo wybrać \emph{Własne pliki}, wskazać zdjęcie i obraz termowizyjny i kliknąć \emph{Wczytaj pliki} & podgląd obu obrazów; informacje o parze, adnotacjach i nagraniu .SEQ \\
+    2. Rejestracja & kliknąć \emph{Uruchom rejestrację} (lub \emph{Wczytaj zapisaną rejestrację}); suwakiem ustawić przezroczystość; opcjonalnie \emph{Zapisz nałożenie\ldots} & nałożenie obrazów, model przekształcenia, kontury znacznika z obu modalności \\
+    3. Segmentacja & kliknąć \emph{Wyznacz narożniki, znamię i znacznik na termowizji} & narożniki 0--7, maska znamienia na zdjęciu, maska znacznika na obrazie termowizyjnym \\
+    4. Przeniesienie ROI & kliknąć \emph{Przenieś na termowizję}; przełączyć widok zdjęcia (\emph{Zdjęcie} / \emph{Nałożenie}) & znamię i znacznik na obrazie termowizyjnym \\
+    5. Pomiary & kliknąć \emph{Oblicz pomiary i zgodność}; kliknąć nazwę wielkości w tabeli, aby wyświetlić jej objaśnienie & tabela wyników (badanie E2, kontrola skali, parametry znamienia, piksele znamienia) oraz uwagi \\
+    6. Raport & kliknąć \emph{Zapisz raport}, następnie \emph{Otwórz raport} lub \emph{Otwórz folder wyników}; przełączać podgląd obrazów raportu & pliki raportu (tab.~\ref{tab:instrukcja-pliki}) \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% TODO: zrzut zakładki „5. Pomiary” (para 14, sekcja „Piksele znamienia na termowizji”) – rysunek opcjonalny:
+% \begin{figure}[htbp]
+%   \centering
+%   \includegraphics[width=\textwidth]{rysunki/interfejs_pomiary.png}
+%   \caption{Zakładka pomiarów: tabela wyników i objaśnienie wybranej wielkości}
+%   \label{fig:interfejs-pomiary}
+% \end{figure}
+
+\section{Wyniki}
+
+Wyniki zapisywane są w folderze \texttt{wyniki\textbackslash wyniki\_obu\textbackslash para\_N} (dla własnych plików -- w folderze nazwanym od nazw plików), który można zmienić w zakładce raportu. Zawartość folderu opisano w tabeli~\ref{tab:instrukcja-pliki}. Raport otwiera się w dowolnej przeglądarce; na jego początku znajdują się uwagi wymagające sprawdzenia, a na końcu objaśnienia wszystkich wielkości.
+
+\begin{table}[!ht]
+  \centering
+  \caption{Pliki wynikowe analizy pary}
+  \label{tab:instrukcja-pliki}
+  \footnotesize
+  \begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{4.4cm} X}
+    \toprule
+    Plik & Zawartość \\
+    \midrule
+    \texttt{raport.html} & raport z obrazami, tabelami wyników, uwagami i objaśnieniami \\
+    \texttt{metryki.json} & wszystkie wyniki liczbowe (do dalszej analizy) \\
+    \texttt{rgb.png}, \texttt{termal.png}, \texttt{nakladka.png}, \texttt{nakladka\_zblizenie.png}, \texttt{znacznik\_modalnosci.png}, \texttt{piksele\_termal.png} & obrazy raportu: zdjęcie i obraz termowizyjny z obrysami, nałożenie, powiększenie wokół znamienia, maski badania E2, piksele znamienia \\
+    \texttt{piksele\_znamienia\_termal.csv} & piksele znamienia na obrazie termowizyjnym: \texttt{x}, \texttt{y} (kolumna i wiersz), \texttt{ulamek} (pokrycie piksela przez znamię), \texttt{w\_masce} (1 -- pokrycie co najmniej 50\%), \texttt{intensywnosc} (surowa wartość z nagrania .SEQ); separator średnik \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\section{Komunikaty i rozwiązywanie problemów}
+
+Najczęstsze komunikaty i sposób postępowania przedstawiono w tabeli~\ref{tab:instrukcja-bledy}. Komunikaty błędów wyświetlane są w oknie dialogowym, a ich szczegóły -- w dzienniku zdarzeń.
+
+\begin{table}[!ht]
+  \centering
+  \caption{Komunikaty systemu i sposób postępowania}
+  \label{tab:instrukcja-bledy}
+  \footnotesize
+  \begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{4.2cm} X X}
+    \toprule
+    Komunikat lub uwaga & Przyczyna & Postępowanie \\
+    \midrule
+    \emph{Nie można otworzyć zdjęcia / obrazu termowizyjnego} & plik nie istnieje lub ma nieobsługiwany format & wskazać plik JPG lub PNG \\
+    \emph{Nie znaleziono znacznika}, \emph{znacznik wykryty niepewnie} & znacznik ucięty przez kadr, zasłonięty lub z silnym odblaskiem & sprawdzić nałożenie; w razie błędu powtórzyć zdjęcie \\
+    \emph{Najpierw wykonaj \ldots} & pominięto wcześniejszy etap & wykonać etapy w kolejności zakładek \\
+    \emph{Nie ma środowiska modeli z PyTorch} & brak środowiska modelu M1 & zainstalować środowisko modeli (Dodatek~\ref{app:dokumentacja}) \\
+    \emph{Brak surowej intensywności termowizji} & brak nagrania .SEQ o tej samej nazwie co obraz & umieścić nagranie obok obrazu i powtórzyć pomiary \\
+    niska zgodność masek między modalnościami (E2) lub błąd narożników powyżej 1~mm & możliwy błąd rejestracji lub segmentacji & ocenić nałożenie; wyników pary nie używać bez sprawdzenia \\
+    \bottomrule
+  \end{tabularx}
+\end{table}

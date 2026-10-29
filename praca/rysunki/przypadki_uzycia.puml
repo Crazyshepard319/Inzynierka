@@ -1,0 +1,59 @@
+@startuml przypadki_uzycia
+!include styl.iuml
+left to right direction
+skinparam usecase {
+  BackgroundColor white
+  BorderColor black
+}
+actor "Użytkownik\n(student / lekarz)" as U
+actor "Badacz\n(przygotowanie danych\ni modeli)" as B
+B -|> U
+
+rectangle "System dopasowania i analizy regionów RGB – termowizja" {
+  usecase "PU1 Wczytaj parę obrazów" as PU1
+  usecase "PU2 Wykonaj rejestrację" as PU2
+  usecase "Wykryj znacznik Π\nw obu modalnościach" as PU2a
+  usecase "Wyznacz macierz T" as PU2b
+  usecase "PU3 Oceń nałożenie obrazów" as PU3
+  usecase "PU4 Wyznacz obszary\n(segmentacja)" as PU4
+  usecase "Segmentuj znamię\n(model M1)" as PU4a
+  usecase "Segmentuj znacznik\nna termowizji (model M3)" as PU4b
+  usecase "Wyznacz narożniki\ni skalę [mm]" as PU4c
+  usecase "PU5 Przenieś ROI\nna termowizję" as PU5
+  usecase "PU6 Oblicz pomiary\ni zgodność masek" as PU6
+  usecase "Oceń wyniki względem\nadnotacji CVAT" as PU6a
+  usecase "PU7 Wygeneruj raport" as PU7
+  usecase "Zapisz analizę w bazie" as PU7a
+  usecase "PU8 Wykonaj wszystkie etapy\n(kolejno PU2, PU4–PU7)" as PU8
+
+  usecase "PU9 Importuj adnotacje CVAT" as PU9
+  usecase "PU10 Trenuj model segmentacji" as PU10
+  usecase "PU11 Przetwórz pary wsadowo" as PU11
+  usecase "PU12 Wygeneruj raport zbiorczy" as PU12
+  usecase "PU13 Przeglądaj / eksportuj bazę" as PU13
+}
+
+U --> PU1
+U --> PU2
+U --> PU4
+U --> PU5
+U --> PU6
+U --> PU7
+U --> PU8
+
+PU2 ..> PU2a : <<include>>
+PU2 ..> PU2b : <<include>>
+PU2 <.. PU3 : <<extend>>
+PU4 ..> PU4a : <<include>>
+PU4 ..> PU4b : <<include>>
+PU4 ..> PU4c : <<include>>
+PU6 <.. PU6a : <<extend>>\n[para ma adnotacje]
+PU7 ..> PU7a : <<include>>
+
+B --> PU9
+B --> PU10
+B --> PU11
+B --> PU12
+B --> PU13
+
+@enduml

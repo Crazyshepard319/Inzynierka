@@ -1,0 +1,121 @@
+@startuml diagram_klas
+!include styl.iuml
+skinparam classAttributeIconSize 0
+skinparam nodesep 35
+skinparam ranksep 45
+hide empty members
+
+package "Prezentacja" {
+  class Aplikacja <<ctk.CTk>> {
+    - a : Analiza
+    - tabs : CTkTabview
+    + _wczytaj_pare()
+    + _rejestruj()
+    + _segmentuj()
+    + _przenies()
+    + _zmierz()
+    + _zapisz_raport()
+    + _wszystkie_etapy()
+    - _w_tle(zadanie)
+  }
+  class Podglad <<ctk.CTkFrame>> {
+    + ustaw(obraz, warstwa)
+    + ustaw_alfa(alfa)
+    + pokaz(widok)
+  }
+}
+
+package "Logika (analiza)" {
+  class Analiza {
+    + rgb, termal : obraz
+    + M : macierz T 3×3
+    + maska_znamie
+    + maska_znacznika_rgb
+    + maska_znacznika_termal_unet
+    + narozniki_rgb, H_rgb
+    + narozniki_termal, H_termal
+    + intensywnosc : surowe wartości .SEQ
+    + piksele : x, y, ułamek, intensywność
+    + wyniki : dict
+    + {static} z_pary(n) : Analiza
+    + rejestruj()
+    + ustaw_narozniki()
+    + segmentuj_znamie()
+    + segmentuj_znacznik_termal()
+    + wczytaj_intensywnosc()
+    + przenies()
+    + zgodnosc_modalnosci() : dict
+    + zmierz() : dict
+    + zapisz_raport() : ścieżka
+    + zapisz_w_bazie()
+  }
+  class BladEtapu <<RuntimeError>>
+  class Baza {
+    + sciezka : Path
+    + utworz()
+    + importuj_dane()
+    + zapisz_analize(a : Analiza)
+    + importuj_wyniki()
+    + info_pary(n) : dict
+    + tabela_wynikow()
+  }
+  class dopasowanie3 <<utility>> {
+    + run_registration(rgb, termal, wynik)
+    + wykryj_znacznik_rgb()
+    + wykryj_znacznik_termal()
+    + dopasuj(m_rgb, m_ter) : macierz T
+  }
+  class "geometria / miary / pomiary / raport" as narz <<utility>> {
+    + przenies_maske(), przenies_punkty()
+    + zgodnosc_masek(a, b) : Dice, IoU, HD95, ASSD
+    + tre(pkt_a, pkt_b)
+    + parametry_rgb(obraz, maska, H_mm)
+    + piksele_znamienia(ułamek, intensywność)
+    + zapisz(raport.html)
+  }
+}
+
+package "Modele segmentacji" {
+  abstract class ModelSegmentacji {
+    + klucz, nazwa : str
+    + prog : float
+    + wczytaj()
+    + segmentuj(obraz, roi) : WynikSegmentacji
+    # _prawdopodobienstwo(wycinek)
+  }
+  class "Model (PanDerm + UperNet, M1)" as M1
+  class "Model (progowanie)" as Prog
+  class WynikSegmentacji <<dataclass>> {
+    + maska, prawdopodobienstwo
+    + roi : tuple
+    + czas_s : float
+  }
+  class Znacznik <<dataclass>> {
+    + maska, wnetrze, obszar
+    + zgodnosc : float
+  }
+  class SegmentacjaZnacznikaTermal {
+    + sciezka : Path (.onnx)
+    + segmentuj(obraz) : maska
+  }
+  class UNet <<nn.Module>> {
+    + forward(x)
+  }
+  class Blok <<nn.Sequential>>
+}
+
+Aplikacja *-- "1..*" Podglad
+Aplikacja --> "0..1" Analiza
+Analiza ..> dopasowanie3 : rejestracja
+Analiza ..> narz
+Analiza ..> Baza : zapis
+Analiza ..> SegmentacjaZnacznikaTermal : M3
+Analiza ..> M1 : M1 (osobny proces)
+Analiza ..> BladEtapu : <<throw>>
+M1 --|> ModelSegmentacji
+Prog --|> ModelSegmentacji
+ModelSegmentacji ..> WynikSegmentacji
+M1 ..> Znacznik : obszar szukania
+UNet *-- "9" Blok
+SegmentacjaZnacznikaTermal ..> UNet : model wyeksportowany\ndo ONNX
+@enduml

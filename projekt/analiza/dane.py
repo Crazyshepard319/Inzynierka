@@ -1,4 +1,5 @@
-"""Dane par z dane/pary/N/: informacje z plikow mapowania i znamiona.csv oraz adnotacje z CVAT."""
+"""Dane par z dane/pary/N/: informacje z bazy SQLite albo plikow mapowania i znamiona.csv, adnotacje z CVAT
+oraz surowa intensywnosc termowizji z nagrania .SEQ."""
 import csv
 import json
 from dataclasses import dataclass, field
@@ -37,8 +38,48 @@ def dostepne_pary():
                   if k.name.isdigit() and (k / "rgb.jpg").exists() and (k / "termal.jpg").exists())
 
 
+NAGRANIA = DANE / "Termowizja"               # nagrania .SEQ par (nazwy w mapowanie_dane_termowizja.csv)
+PLIK_SUROWYCH = "termal_surowe.npy"          # dane/pary/N/: surowe wartosci detektora (temperatury_par.py)
+
+
+def nagranie_seq(termowizja, nazwa_nagrania=None):
+    """Nagranie .SEQ obrazu termowizyjnego: dane/Termowizja/<nazwa_nagrania> (para z bazy, nazwa z mapowania)
+    albo plik .seq/.SEQ o tej samej nazwie obok obrazu (wlasne pliki). None, gdy nie ma."""
+    kandydaci = [NAGRANIA / nazwa_nagrania] if nazwa_nagrania else []
+    t = Path(termowizja)
+    kandydaci += [t.with_suffix(".SEQ"), t.with_suffix(".seq")]
+    return next((p for p in kandydaci if p.is_file()), None)
+
+
+def intensywnosc_surowa(termowizja, para=None, nazwa_nagrania=None):
+    """Surowe wartosci detektora (uint16) z pierwszej klatki nagrania .SEQ, piksel w piksel jak obraz
+    termowizyjny (te same poprawki odczytu co read_flirpy.wczytaj_klatki: obciete wiersze telemetrii,
+    przesuniecie kolumn). Para z bazy: dane/pary/N/termal_surowe.npy (bez flirpy); inaczej odczyt nagrania
+    biblioteka flirpy. Zwraca (tablica albo None, zrodlo albo powod braku - tekst)."""
+    if para is not None and (PARY / str(para) / PLIK_SUROWYCH).is_file():
+        return np.load(PARY / str(para) / PLIK_SUROWYCH), f"dane/pary/{para}/{PLIK_SUROWYCH}"
+    seq = nagranie_seq(termowizja, nazwa_nagrania)
+    if seq is None:
+        return None, "brak nagrania .SEQ do tego obrazu"
+    try:
+        from read_flirpy import wczytaj_klatki          # wymaga flirpy (srodowisko aplikacji)
+    except ImportError as e:
+        return None, f"nie mozna odczytac {seq.name}: brak biblioteki ({e.name})"
+    return np.rint(wczytaj_klatki(seq, 1)[0]).astype(np.uint16), seq.name
+
+
 def info_pary(n):
-    """Oryginalne nazwy plikow, data zdjecia, numer znamienia i fold."""
+    """Oryginalne nazwy plikow, data zdjecia, numer znamienia i fold - z bazy SQLite (dane/baza.sqlite),
+    gdy para jest w bazie, a inaczej z plikow CSV (mapowanie_*.csv, znamiona.csv)."""
+    if (DANE / "baza.sqlite").exists():
+        try:
+            from .baza import Baza
+            with Baza(utworz=False) as b:
+                info = b.info_pary(n)
+            if info is not None:
+                return info
+        except Exception:                                    # noqa: BLE001 - baza niedostepna: pliki CSV
+            pass
     info = {}
     for r in _csv("mapowanie_dane_RGB.csv"):
         if r["plik"] == f"{n}.jpg":

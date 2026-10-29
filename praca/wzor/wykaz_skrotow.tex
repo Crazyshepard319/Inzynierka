@@ -1,0 +1,94 @@
+% =====================================================================
+% Wykaz ważniejszych oznaczeń i skrótów (WZÓR) – w szablonie PG wstaw w przeznaczone miejsce
+% (zwykle po spisie treści). Zawiera tylko skróty i oznaczenia użyte w rozdziałach 1–7 i dodatkach wzoru.
+% Wymaga pakietu longtable. Nazwy własne (PanDerm, OpenCV, SQLite) i nazwy zbiorów danych bez rozwinięcia
+% nie są skrótami – pominięto je. Przy pierwszym użyciu w tekście skrót i tak należy rozwinąć.
+% =====================================================================
+
+\chapter*{Wykaz ważniejszych oznaczeń i skrótów}
+\addcontentsline{toc}{chapter}{Wykaz ważniejszych oznaczeń i skrótów}
+
+\subsection*{Oznaczenia}
+
+{\small
+\begin{longtable}{@{}p{2.6cm}p{12.2cm}@{}}
+  $A$, $B$ & porównywane maski; w badaniu E2: $A$ -- maska przeniesiona ze zdjęcia, $B$ -- maska wyznaczona na obrazie termowizyjnym \\
+  $|A|$ & pole maski $A$ \\
+  $d$ & średnica równoważna znamienia \\
+  $e$ & średni błąd krawędzi masek znacznika \\
+  $G_\sigma$ & filtr Gaussa o odchyleniu standardowym $\sigma$ \\
+  $H$, $H_T$ & homografia przekształcająca piksele obrazu na milimetry w płaszczyźnie znacznika; $H_T$ -- dla obrazu termowizyjnego \\
+  $I$ & surowa wartość detektora (intensywność) piksela obrazu termowizyjnego \\
+  $L$, $P$ & obwód i pole znamienia \\
+  $M_R$, $M_T$ & maska znacznika na zdjęciu i na obrazie termowizyjnym \\
+  $p_i^R$, $p_i^T$ & $i$-ty narożnik znacznika na zdjęciu i na obrazie termowizyjnym \\
+  P1--P8 & narożniki znacznika $\Pi$ \\
+  $T$ & macierz rejestracji 3~$\times$~3 (piksel zdjęcia $\to$ piksel obrazu termowizyjnego) \\
+  $u$ & ułamek pola piksela pokryty przez znamię \\
+  $W_0$, $W_A$, $W_H$ & przekształcenie: wstępne (podobieństwo), afiniczne, homografia \\
+  $x$, $y$ & współrzędne piksela: kolumna i wiersz \\
+  $\eta$ & współczynnik uczenia \\
+  $\varepsilon$ & próg zbieżności metody ECC \\
+  $\lambda$ & współczynnik regularyzacji wag (ang.~\textit{weight decay}) \\
+  $\Pi$ & znacznik referencyjny w kształcie litery $\Pi$ \\
+  $\rho$ & współczynnik korelacji rang Spearmana \\
+  $\sigma$ & odchylenie standardowe; parametr rozmycia filtrem Gaussa \\
+  j.s. & jednostki surowe detektora kamery termowizyjnej \\
+\end{longtable}
+}
+
+\subsection*{Skróty}
+
+{\small
+\begin{longtable}{@{}p{2.6cm}p{12.2cm}@{}}
+  ASSD & średnia symetryczna odległość konturów (ang.~\textit{average symmetric surface distance}) \\
+  BCE & binarna entropia krzyżowa (ang.~\textit{binary cross-entropy}) \\
+  CSV & plik tekstowy z wartościami rozdzielonymi separatorem (ang.~\textit{comma-separated values}) \\
+  CUDA & platforma obliczeń równoległych na procesorach graficznych (ang.~\textit{Compute Unified Device Architecture}) \\
+  CVAT & program do adnotacji obrazów (ang.~\textit{Computer Vision Annotation Tool}) \\
+  DSC & współczynnik Dice'a (ang.~\textit{Dice similarity coefficient}) \\
+  E1, E2, E4 & badania weryfikacyjne: E1 -- dokładność rejestracji względem adnotacji, E2 -- zgodność masek znacznika między modalnościami bez adnotacji, E4 -- porównanie metod rejestracji \\
+  ECC & rozszerzony współczynnik korelacji (ang.~\textit{enhanced correlation coefficient}) \\
+  FLE & błąd lokalizacji znacznika (ang.~\textit{fiducial localization error}) \\
+  FPN & piramidalna sieć cech (ang.~\textit{Feature Pyramid Network}) \\
+  FRE & błąd dopasowania znaczników (ang.~\textit{fiducial registration error}) \\
+  GPU & procesor graficzny (ang.~\textit{graphics processing unit}) \\
+  HD95 & 95. percentyl odległości Hausdorffa (ang.~\textit{95th percentile Hausdorff distance}) \\
+  HEIC & format zapisu zdjęć (ang.~\textit{High Efficiency Image Container}) \\
+  HTML & język znaczników dokumentów internetowych (ang.~\textit{HyperText Markup Language}) \\
+  IoU & indeks Jaccarda -- iloraz części wspólnej i sumy obszarów (ang.~\textit{intersection over union}) \\
+  ISBI & międzynarodowe sympozjum obrazowania biomedycznego (ang.~\textit{International Symposium on Biomedical Imaging}) \\
+  ISIC & międzynarodowa współpraca w zakresie obrazowania skóry (ang.~\textit{International Skin Imaging Collaboration}) \\
+  JAC & indeks Jaccarda (ang.~\textit{Jaccard index}) \\
+  JPG & format stratnej kompresji obrazów (ang.~\textit{Joint Photographic Experts Group}) \\
+  JSON & tekstowy format wymiany danych (ang.~\textit{JavaScript Object Notation}) \\
+  M1 & model segmentacji znamienia na zdjęciu (PanDerm z dekoderem UperNet) \\
+  M3 & model segmentacji znacznika na obrazie termowizyjnym (U-Net) \\
+  MI & informacja wzajemna (ang.~\textit{mutual information}) \\
+  MR & rezonans magnetyczny (ang.~\textit{magnetic resonance}) \\
+  NIR & bliska podczerwień (ang.~\textit{near infrared}) \\
+  NMI & znormalizowana informacja wzajemna (ang.~\textit{normalized mutual information}) \\
+  OECD & Organizacja Współpracy Gospodarczej i Rozwoju (ang.~\textit{Organisation for Economic Co-operation and Development}) \\
+  ONNX & otwarty format zapisu modeli sieci neuronowych (ang.~\textit{Open Neural Network Exchange}) \\
+  PNG & format bezstratnej kompresji obrazów (ang.~\textit{Portable Network Graphics}) \\
+  PPM & moduł łączenia piramidalnego (ang.~\textit{Pyramid Pooling Module}) \\
+  PU & przypadek użycia \\
+  ReLU & funkcja aktywacji -- jednostka liniowa z obcięciem (ang.~\textit{rectified linear unit}) \\
+  RGB & model barw: czerwony, zielony, niebieski; w pracy -- zdjęcie w świetle widzialnym (ang.~\textit{red, green, blue}) \\
+  ROI & obszar zainteresowania (ang.~\textit{region of interest}) \\
+  SEQ & format nagrań kamer termowizyjnych FLIR (sekwencja klatek z danymi radiometrycznymi) \\
+  SQL & strukturalny język zapytań (ang.~\textit{Structured Query Language}) \\
+  SSIM & indeks podobieństwa strukturalnego (ang.~\textit{structural similarity index}) \\
+  SURF & przyspieszone odporne cechy (ang.~\textit{Speeded-Up Robust Features}) \\
+  T01--T18 & testy funkcjonalne systemu \\
+  TG1--TG6 & testy interfejsu graficznego \\
+  TH & obraz termowizyjny (ang.~\textit{thermal}) \\
+  TRE & błąd w punkcie docelowym (ang.~\textit{target registration error}) \\
+  TRUS & ultrasonografia przezodbytnicza (ang.~\textit{transrectal ultrasound}) \\
+  UML & ujednolicony język modelowania (ang.~\textit{Unified Modeling Language}) \\
+  ViT & transformer wizyjny (ang.~\textit{Vision Transformer}); ViT-L -- wariant duży \\
+  VIS & światło widzialne (ang.~\textit{visible}) \\
+  WF & wymaganie funkcjonalne \\
+  WN & wymaganie pozafunkcjonalne \\
+\end{longtable}
+}

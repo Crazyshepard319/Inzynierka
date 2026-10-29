@@ -1,9 +1,13 @@
 """
-Mapy temperatur [°C] dla wszystkich par: dane/Termowizja/<nagranie>.SEQ -> dane/pary/N/termal_C.npy
+Mapy temperatur [°C] i surowe wartosci detektora dla wszystkich par:
+dane/Termowizja/<nagranie>.SEQ -> dane/pary/N/termal_C.npy + dane/pary/N/termal_surowe.npy
 
     python temperatury_par.py [--emisyjnosc 0.98]
+    python temperatury_par.py --tylko_surowe      # tylko termal_surowe.npy (intensywnosc pikseli znamienia)
 
-termal_C.npy = float32 (240 x 320), piksel w piksel jak termal.jpg (te same poprawki odczytu co
+termal_C.npy = float32 (240 x 320), termal_surowe.npy = uint16 (240 x 320) - surowa wartosc detektora
+pierwszej klatki (ta sama, z ktorej powstal termal.jpg), uzywana jako intensywnosc pikseli znamienia
+(analiza/pomiary.piksele_znamienia). Obie piksel w piksel jak termal.jpg (te same poprawki odczytu co
 read_flirpy.py). Ktore nagranie nalezy do pary - z dane/mapowanie_dane_termowizja.csv.
 Kontrola: korelacja rang temperatury z jasnoscia termal.jpg (paleta inferno rosnie z temperatura)
 musi byc bliska 1 - inaczej mapa i obraz nie pasuja do siebie.
@@ -18,7 +22,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from read_flirpy import EMISYJNOSC_SKORY, temperatura_c
+from read_flirpy import EMISYJNOSC_SKORY, temperatura_c, wczytaj_klatki
 
 INZ = Path(__file__).resolve().parent.parent
 DANE = INZ / "dane"
@@ -33,6 +37,7 @@ def _rangi(x):
 def main():
     ap = argparse.ArgumentParser(description="Mapy temperatur °C dla par")
     ap.add_argument("--emisyjnosc", type=float, default=EMISYJNOSC_SKORY)
+    ap.add_argument("--tylko_surowe", action="store_true", help="tylko termal_surowe.npy (bez map °C i temperatury.csv)")
     a = ap.parse_args()
 
     with open(DANE / "mapowanie_dane_termowizja.csv", encoding="utf-8-sig") as f:
@@ -42,10 +47,20 @@ def main():
     for n in pary:
         kat = DANE / "pary" / str(n)
         seq = DANE / "Termowizja" / nagranie[f"{n}.jpg"]
+        surowe = np.rint(wczytaj_klatki(seq, 1)[0]).astype(np.uint16)
+        np.save(kat / "termal_surowe.npy", surowe)
+        szary = cv2.cvtColor(cv2.imread(str(kat / "termal.jpg")), cv2.COLOR_BGR2GRAY).astype(np.float64)
+        if a.tylko_surowe:
+            if surowe.shape != szary.shape:
+                problemy.append(f"para {n}: surowe {surowe.shape} != termal.jpg {szary.shape}")
+            else:
+                rho = float(np.corrcoef(_rangi(surowe.ravel()), _rangi(szary.ravel()))[0, 1])
+                if rho < 0.95:
+                    problemy.append(f"para {n}: korelacja rang surowych z termal.jpg {rho:.3f} < 0,95")
+            print(f"para {n}: {seq.name} -> termal_surowe.npy  ({surowe.min()}..{surowe.max()})")
+            continue
         t, meta = temperatura_c(seq, a.emisyjnosc)
         np.save(kat / "termal_C.npy", t)
-
-        szary = cv2.cvtColor(cv2.imread(str(kat / "termal.jpg")), cv2.COLOR_BGR2GRAY).astype(np.float64)
         if szary.shape != t.shape:
             problemy.append(f"para {n}: mapa {t.shape} != termal.jpg {szary.shape}")
         else:
@@ -65,11 +80,14 @@ def main():
         print(f"para {n}: {seq.name} -> termal_C.npy  skora {wiersze[-1]['T_skory_mediana']:.2f} °C "
               f"(p5 {wiersze[-1]['T_skory_p5']:.2f}, p95 {wiersze[-1]['T_skory_p95']:.2f})")
 
-    with open(DANE / "temperatury.csv", "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.DictWriter(f, fieldnames=list(wiersze[0]), delimiter=";")
-        w.writeheader()
-        w.writerows(wiersze)
-    print(f"\nGotowe: {len(wiersze)} map. Podsumowanie: {DANE / 'temperatury.csv'}")
+    if wiersze:
+        with open(DANE / "temperatury.csv", "w", newline="", encoding="utf-8-sig") as f:
+            w = csv.DictWriter(f, fieldnames=list(wiersze[0]), delimiter=";")
+            w.writeheader()
+            w.writerows(wiersze)
+        print(f"\nGotowe: {len(wiersze)} map. Podsumowanie: {DANE / 'temperatury.csv'}")
+    else:
+        print(f"\nGotowe: termal_surowe.npy dla {len(pary)} par.")
     print("Problemy:", "brak" if not problemy else "")
     for p in problemy:
         print("  -", p)

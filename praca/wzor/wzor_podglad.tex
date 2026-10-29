@@ -1,0 +1,60 @@
+% Plik pomocniczy: podgląd wzoru całej pracy (bez strony tytułowej) poza szablonem PG.
+% Kompilacja w folderze praca/wzor: pdflatex wzor_podglad; bibtex wzor_podglad; pdflatex ×2.
+% W docelowej pracy wstaw pliki przez \input{wzor/...} w szablonie PG; potrzebne pakiety i polskie
+% nazwy dla algorytmów i listingów skopiuj z preambuły poniżej.
+\documentclass[12pt,a4paper]{report}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+% \usepackage{lmodern} % odkomentuj, jeśli masz pakiet lmodern
+\usepackage[provide=*]{babel}
+\babelprovide[import,main]{polish}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{makecell}
+\usepackage{amsmath}
+\usepackage{textcomp}
+\usepackage[chapter]{algorithm} % numeracja algorytmów w rozdziale (5.1, 5.2)
+\usepackage[noend]{algpseudocode}
+\usepackage{listings}
+\usepackage[hidelinks]{hyperref}
+\graphicspath{{../}}
+
+% --- polskie nazwy: algorytmy (pakiety algorithm, algpseudocode) ---
+\floatname{algorithm}{Algorytm}
+\renewcommand{\listalgorithmname}{Spis algorytmów}
+\algrenewcommand\algorithmicrequire{\textbf{Wejście:}}
+\algrenewcommand\algorithmicensure{\textbf{Wyjście:}}
+\algrenewcommand\algorithmicfor{\textbf{dla}}
+\algrenewcommand\algorithmicforall{\textbf{dla wszystkich}}
+\algrenewcommand\algorithmicdo{\textbf{wykonaj}}
+\algrenewcommand\algorithmicif{\textbf{jeżeli}}
+\algrenewcommand\algorithmicthen{\textbf{to}}
+\algrenewcommand\algorithmicelse{\textbf{w przeciwnym razie}}
+\algrenewcommand\algorithmicreturn{\textbf{zwróć}}
+\algrenewcommand{\algorithmiccomment}[1]{\hfill$\triangleright$~#1}
+% --- listingi (pakiet listings) ---
+\renewcommand{\lstlistingname}{Listing}
+\renewcommand{\lstlistlistingname}{Spis listingów}
+\lstset{basicstyle=\ttfamily\footnotesize, frame=single, columns=fullflexible, keepspaces=true,
+        breaklines=true, captionpos=t}
+
+\begin{document}
+\input{streszczenie_abstract}
+\tableofcontents
+\input{wykaz_skrotow}
+\input{rozdzial1_wstep}
+\input{rozdzial2_analiza_stanu_wiedzy}
+\input{rozdzial3_analiza_projektowa}
+\input{rozdzial4_projekt_systemu}
+\input{rozdzial5_implementacja}
+\input{rozdzial6_testy_wyniki}
+\input{rozdzial7_podsumowanie}
+\bibliographystyle{acm}
+\bibliography{literatura_wzor}
+\appendix
+\input{dodatek_a_instrukcja}
+\input{dodatek_b_dokumentacja}
+\end{document}

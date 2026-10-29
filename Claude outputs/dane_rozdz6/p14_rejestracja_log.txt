@@ -1,0 +1,13 @@
+== Detekcja znacznikow ========================================
+  [termal] srodek=(174.1,124.4)  promien rown.=66.2px  zgodnosc z wzorcem Pi=0.888  kryterium: ciemne < 0.8 skory lub tekstura > 10  prog krawedzi=112 (folia 65 / skora 160)  obraz=320x240
+  [rgb]    srodek=(952.9,1330.8)  promien rown.=562.0px  zgodnosc z wzorcem Pi=0.916  kryterium: chlodniejsze > 3.0 i tekstura > 1.5, morfologia 2/2 + GrabCut  obraz=2244x2590
+
+== Dopasowanie ksztaltow znacznikow ===========================
+  wstepnie: kat=3.50 st  skala=3.279 px RGB(rob.)/px termal  IoU ksztaltu=0.887
+    podobienstwo  Dice=0.9397  sredni blad krawedzi=2.22 px termal
+    afiniczna     Dice=0.9655  sredni blad krawedzi=1.23 px termal
+    homografia    Dice=0.9726  sredni blad krawedzi=0.98 px termal
+  => wybrany model: homografia
+
+  Dice=0.9726  sredni blad krawedzi=0.98 px termal (~8.3 px RGB)
+Wynik: C:\Users\groch\OneDrive\Pulpit\Inzynierka\wyniki\wyniki_dopasowania\para_14\dopasowanie.png

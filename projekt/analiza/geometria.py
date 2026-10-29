@@ -68,19 +68,52 @@ def wypelnij(wielokaty, ksztalt, skala=1):
         x1, y1 = np.minimum(np.ceil(q.max(0)).astype(int), [W - 1, H - 1])
         if x1 < x0 or y1 < y0:
             continue
-        m[y0:y1 + 1, x0:x1 + 1] |= _wewnatrz(q, x0, x1, y0, y1)
+        krok = max(1, int(2e7 // (len(q) * (x1 - x0 + 1))))        # pamiec: wiersze paczkami (~20 mln porownan)
+        for r0 in range(y0, y1 + 1, krok):
+            r1 = min(y1, r0 + krok - 1)
+            m[r0:r1 + 1, x0:x1 + 1] |= _wewnatrz(q, x0, x1, r0, r1)
     return m
 
 
-def przenies_maske(maska, M, ksztalt_celu, skala=1):
-    """Maska (uint8/bool) z obrazu zrodlowego -> maska bool w obrazie celu (opcjonalnie `skala`x gesciej)."""
-    return wypelnij([przenies_punkty(k, M) for k in kontury(maska)], ksztalt_celu, skala)
+def przenies_maske(maska, M, ksztalt_celu, skala=1, uproszczenie=0.0):
+    """Maska (uint8/bool) z obrazu zrodlowego -> maska bool w obrazie celu (opcjonalnie `skala`x gesciej).
+    uproszczenie > 0: kontur upraszczany (Douglas-Peucker, tolerancja w px obrazu zrodlowego) przed
+    przeniesieniem - dla duzych masek (folia na zdjeciu: tysiace punktow konturu)."""
+    ks = kontury(maska)
+    if uproszczenie > 0:
+        ks = [cv2.approxPolyDP(k.astype(np.float32)[:, None], uproszczenie, True)[:, 0].astype(np.float64) for k in ks]
+    return wypelnij([przenies_punkty(k, M) for k in ks], ksztalt_celu, skala)
 
 
 def ulamek_pokrycia(maska_gesta, skala):
     """Maska `skala`x gestsza -> ulamek pokrycia kazdego piksela siatki 1x (0..1)."""
     h, w = maska_gesta.shape[0] // skala, maska_gesta.shape[1] // skala
     return maska_gesta.reshape(h, skala, w, skala).mean(axis=(1, 3))
+
+
+def powieksz_maske(maska, skala):
+    """Maska siatki 1x -> siatka `skala`x gestsza (kazdy piksel na skala x skala pikseli, bez interpolacji)."""
+    m = np.asarray(maska) > 0
+    return m if skala == 1 else np.repeat(np.repeat(m, skala, axis=0), skala, axis=1)
+
+
+def wnetrze_znacznika(maska, otwarcie=1):
+    """Otwor miedzy ramionami znacznika Π: otoczka wypukla maski folii minus folia, najwieksza skladowa
+    (spojnosc 4) po otwarciu morfologicznym promieniem `otwarcie` px (usuwa waskie paski wzdluz brzegow).
+    Ta sama funkcja dla maski przeniesionej ze zdjecia i maski z termowizji, w tej samej siatce."""
+    m = (np.asarray(maska) > 0).astype(np.uint8)
+    pkt = cv2.findNonZero(m)
+    if pkt is None:
+        return np.zeros(m.shape, bool)
+    otoczka = np.zeros_like(m)
+    cv2.fillConvexPoly(otoczka, cv2.convexHull(pkt), 1)
+    w = otoczka & (1 - m)
+    if otwarcie > 0:
+        w = cv2.morphologyEx(w, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * otwarcie + 1,) * 2))
+    n, lab, st, _ = cv2.connectedComponentsWithStats(w, connectivity=4)
+    if n < 2:
+        return np.zeros(m.shape, bool)
+    return lab == 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA]))
 
 
 def mm_na_px(H, punkt):

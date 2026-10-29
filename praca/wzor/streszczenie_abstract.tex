@@ -1,0 +1,25 @@
+% =====================================================================
+% Streszczenie i Abstract (WZÓR) – w szablonie PG wstaw w przeznaczone miejsca (przed spisem treści).
+% Słowa kluczowe: 5–6; dziedzina OECD – sprawdź listę w szablonie PG.
+% W tekście angielskim kropka dziesiętna. Plan: materialy/07_plan_dodatki_streszczenie_skroty.md.
+% =====================================================================
+
+\chapter*{Streszczenie}
+\addcontentsline{toc}{chapter}{Streszczenie}
+
+Termografia może uzupełniać ocenę zmian skórnych na zdjęciach o informację o rozkładzie temperatury skóry, ale wspólna analiza obu obrazów wymaga ich rejestracji. Zdjęcie z telefonu i obraz termowizyjny pochodzą z niezależnych urządzeń, a znamię bez schłodzenia skóry nie jest widoczne na termogramie. Celem pracy było opracowanie, implementacja oraz ocena systemu, który rejestruje zdjęcie RGB i obraz termowizyjny zmiany skórnej, przenosi obszar zainteresowania między modalnościami, wyznacza jego parametry ilościowe i weryfikuje zgodność obszaru za pomocą modeli segmentacji dedykowanych każdej modalności. Zaprojektowano znacznik referencyjny w kształcie litery $\Pi$, widoczny w obu modalnościach, i metodę rejestracji maksymalizującą kryterium ECC na maskach znacznika. Znamię na zdjęciu segmentuje model PanDerm z dekoderem UperNet douczony na zbiorze ISIC 2018, a znacznik na obrazie termowizyjnym -- sieć U-Net uczona na danych własnych. System wyznacza wymiary znamienia w milimetrach, miary zgodności masek oraz współrzędne i surową intensywność pikseli obrazu termowizyjnego w obszarze znamienia, a wyniki zapisuje w raporcie i bazie danych SQLite. Weryfikację przeprowadzono na 94 parach obrazów 34 znamion. Mediana błędu rejestracji wyniosła 0,61~mm (w 85\% par nie więcej niż 1~mm), wobec 3,36~mm dla rejestracji z użyciem informacji wzajemnej. Sieć U-Net uzyskała współczynnik Dice'a 0,969, a model PanDerm na zdjęciach z telefonu -- 0,870. Zgodność masek znacznika między modalnościami, wyznaczana bez adnotacji (Dice 0,957), była silnie skorelowana z błędem rejestracji, co pozwala wskazywać pary wymagające sprawdzenia.
+
+\vspace{1em}
+\noindent\textbf{Słowa kluczowe:} rejestracja obrazów wielomodalnych, termowizja, segmentacja obrazów medycznych, znamię barwnikowe, znacznik referencyjny, uczenie głębokie.
+
+\noindent\textbf{Dziedzina nauki i techniki, zgodnie z wymogami OECD:} nauki inżynieryjne i techniczne, inżynieria medyczna. % TODO: sprawdzić brzmienie w szablonie PG
+
+\chapter*{Abstract}
+\addcontentsline{toc}{chapter}{Abstract}
+
+Thermal imaging can complement the assessment of skin lesions in photographs with information on skin temperature distribution, but a joint analysis of both images requires their registration. A smartphone photograph and a thermal image come from independent devices, and a nevus is not visible in a thermogram unless the skin is cooled. The aim of this thesis was to design, implement and evaluate a system that registers an RGB photograph and a thermal image of a skin lesion, transfers the region of interest between the modalities, computes its quantitative parameters, and verifies the agreement of the region using segmentation models dedicated to each modality. A $\Pi$-shaped fiducial marker visible in both modalities was designed, together with a registration method that maximizes the enhanced correlation coefficient (ECC) on marker masks. The nevus in the photograph is segmented by the PanDerm foundation model with an UperNet decoder fine-tuned on the ISIC 2018 dataset, and the marker in the thermal image by a U-Net trained on the author's data. The system measures the lesion in millimeters, computes mask agreement metrics, and exports the coordinates and raw intensity of every thermal image pixel within the lesion; the results are stored in a report and an SQLite database. The system was evaluated on 94 image pairs of 34 nevi. The median target registration error was 0.61~mm (at most 1~mm in 85\% of pairs), compared with 3.36~mm for mutual information registration. The U-Net achieved a Dice coefficient of 0.969, and PanDerm achieved 0.870 on smartphone photographs. The agreement of marker masks between modalities, computed without annotations (Dice 0.957), was strongly correlated with the registration error, which allows pairs requiring inspection to be identified.
+
+\vspace{1em}
+\noindent\textbf{Keywords:} multimodal image registration, thermal imaging, medical image segmentation, melanocytic nevus, fiducial marker, deep learning.
+
+\noindent\textbf{Field of science and technology in accordance with OECD requirements:} engineering and technology, medical engineering. % TODO: sprawdzić w szablonie PG

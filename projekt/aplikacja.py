@@ -8,8 +8,9 @@ Wszystko jest wyznaczane automatycznie; adnotacje z CVAT (gdy para je ma) sluza 
   3. Segmentacja    narozniki znacznika (wzorzec Π dopasowany do maski znacznika) -> skala w mm;
                     znamie modelem PanDerm we wnetrzu znacznika
   4. Przeniesienie  znamie i znacznik: zdjecie -> termowizja (T)
-  5. Pomiary        wymiary i kolor znamienia, kontrola skali, ocena wzgledem CVAT, objasnienia wielkosci
-  6. Raport         raport.html + metryki.json + obrazy PNG w wyniki/wyniki_obu/...
+  5. Pomiary        wymiary i kolor znamienia, kontrola skali, ocena wzgledem CVAT, objasnienia wielkosci;
+                    piksele termowizji objete znamieniem: x, y i surowa intensywnosc z nagrania .SEQ
+  6. Raport         raport.html + metryki.json + obrazy PNG + piksele_znamienia_termal.csv w wyniki/wyniki_obu/...
 
 Podglady: kolko myszy = powiekszenie, przeciaganie myszka = przesuwanie, dwuklik = widok poczatkowy.
 
@@ -35,7 +36,7 @@ PROJEKT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJEKT))
 import dopasowanie3 as dopasowanie                               # noqa: E402
 from analiza import geometria as geo, raport                     # noqa: E402
-from analiza.dane import INZ, dostepne_pary, imread              # noqa: E402
+from analiza.dane import INZ, dostepne_pary, imread, nagranie_seq   # noqa: E402
 from analiza.obrazy import ramka                                 # noqa: E402
 from analiza.system import OPIS_ZNAMIENIA, Analiza, BladEtapu, analizuj   # noqa: E402
 
@@ -50,7 +51,7 @@ KOLOR_LOG_TLO = "#161616"
 KOLOR_LOG_TEKST = "#c8c8c8"
 OK, PRACA, BLAD, SZARY = "#2cc97a", "#e8a020", "#e84040", "gray"
 # kolory obrysow (jak w raporcie)
-ZIELONY, CZERWONY, FIOLET, NIEBIESKI = "#00d000", "#ff3030", "#ff40ff", "#20a8ff"
+ZIELONY, CZERWONY, FIOLET, NIEBIESKI, TURKUS = "#00d000", "#ff3030", "#ff40ff", "#20a8ff", "#00e5ff"
 
 ZAKLADKI = ("1. Dane", "2. Rejestracja", "3. Segmentacja", "4. Przeniesienie ROI", "5. Pomiary", "6. Raport")
 ETAPY = ("wejscie", "rejestracja", "segmentacja", "przeniesienie", "pomiary", "raport")
@@ -457,6 +458,9 @@ class Aplikacja(ctk.CTk):
         if "znamie" in i:
             linie.append(f"Znamię nr {i['znamie']}, fold {i['fold']}")
         linie.append("Adnotacje z CVAT: " + ("są (tylko do oceny wyników)" if a.wzorzec is not None else "brak"))
+        seq = nagranie_seq(a.ter_path, i.get("termal_nagranie"))
+        linie.append("Nagranie .SEQ (intensywność pikseli): " + (seq.name if seq is not None else
+                     "brak – piksele znamienia nie będą zapisane (dla własnych plików: .SEQ o tej samej nazwie obok obrazu)"))
         if (a.folder_rejestracji / "dopasowanie_macierz.txt").exists():
             linie.append("Jest zapisana rejestracja (można ją wczytać w kroku 2).")
         self._lbl_info.configure(text="\n".join(linie))
@@ -540,15 +544,20 @@ class Aplikacja(ctk.CTk):
         self._naglowek(p, "Znacznik i znamię", 0)
         self._opis(p, "Narożniki znacznika: wzorzec Π (35 × 26 mm, pasek 9 mm) dopasowany do maski znacznika "
                       "z rejestracji → skala w mm. Znamię: model PanDerm we wnętrzu znacznika (osobne środowisko "
-                      "modeli z PyTorch; pierwsze uruchomienie wczytuje wagi).", 1)
-        self._btn_seg = self._przycisk(p, "Wyznacz narożniki i znamię", self._segmentuj, 2, glowny=True)
+                      "modeli z PyTorch; pierwsze uruchomienie wczytuje wagi). Znacznik na termowizji: model U-Net "
+                      "(M3), niezależnie od rejestracji – do oceny zgodności między modalnościami (E2).", 1)
+        self._btn_seg = self._przycisk(p, "Wyznacz narożniki, znamię i znacznik na termowizji", self._segmentuj, 2,
+                                       glowny=True)
         self._naglowek(p, "Narożniki", 3)
         self._lbl_nar = self._opis(p, "", 4, kolor=("gray20", "gray80"))
         self._naglowek(p, "Znamię", 5)
         self._lbl_zn = self._opis(p, "", 6, kolor=("gray20", "gray80"))
+        self._naglowek(p, "Znacznik na termowizji (U-Net)", 7)
+        self._lbl_unet = self._opis(p, "", 8, kolor=("gray20", "gray80"))
         self._opis(p, "Kolory: zielony – znacznik i narożniki 0–7, czerwony – znamię z PanDerm, niebieski – znamię "
-                      "z CVAT (tylko do porównania, gdy para ma adnotacje).", 7)
-        self._dalej(p, 8, 3)
+                      "z CVAT (tylko do porównania, gdy para ma adnotacje). Maska U-Netu: turkusowa na termowizji "
+                      "w kroku 4.", 9)
+        self._dalej(p, 10, 3)
         self._pg_seg = Podglad(t, "Zdjęcie: narożniki znacznika i znamię")
         self._pg_seg.grid(row=0, column=1, sticky="nsew", pady=4)
 
@@ -557,8 +566,10 @@ class Aplikacja(ctk.CTk):
 
         def zadanie():
             a.ustaw_narozniki()
-            return a.segmentuj_znamie(log)
-        self._w_tle("Narożniki i znamię (PanDerm)", zadanie, lambda _: self._odswiez_widoki())
+            a.segmentuj_znamie(log)
+            return a.segmentuj_znacznik_termal(log)
+        self._w_tle("Narożniki, znamię (PanDerm) i znacznik na termowizji (U-Net)", zadanie,
+                    lambda _: self._odswiez_widoki())
 
     # ── 4. przeniesienie ROI ────────────────────────────────────────────────
     def _zakladka_przeniesienie(self, t):
@@ -573,7 +584,8 @@ class Aplikacja(ctk.CTk):
         self._widok_prz.set("Zdjęcie")
         self._widok_prz.grid(row=11, column=0, sticky="ew", padx=10, pady=4)
         self._opis(p, "Kolory: zielony – znacznik ze zdjęcia, fioletowy – znacznik na termowizji (z CVAT, gdy para "
-                      "ma adnotacje), czerwony – znamię. Przezroczystość nałożenia: suwak w kroku 2.", 12)
+                      "ma adnotacje), turkusowy – maska znacznika z U-Netu (termowizja), czerwony – znamię. "
+                      "Przezroczystość nałożenia: suwak w kroku 2.", 12)
         self._dalej(p, 13, 4)
         prawa = ctk.CTkFrame(t, fg_color="transparent")
         prawa.grid(row=0, column=1, sticky="nsew")
@@ -592,7 +604,10 @@ class Aplikacja(ctk.CTk):
         p = self._panel(t)
         self._naglowek(p, "Pomiary i zgodność", 0)
         self._opis(p, "Wymiary i kolor znamienia w mm (skala z narożników znacznika), kontrola skali obu "
-                      "modalności i – gdy są adnotacje z CVAT – ocena rejestracji (badanie E1) i maski PanDerm.", 1)
+                      "modalności, zgodność masek znacznika między modalnościami (badanie E2: zdjęcie → T a U-Net) "
+                      "i – gdy są adnotacje z CVAT – ocena rejestracji (badanie E1), maski PanDerm i U-Netu. "
+                      "Dla pikseli termowizji objętych znamieniem: współrzędne x, y i surowa intensywność z nagrania "
+                      ".SEQ (lista w piksele_znamienia_termal.csv po zapisaniu raportu).", 1)
         self._btn_pom = self._przycisk(p, "Oblicz pomiary i zgodność", self._zmierz, 2, glowny=True)
         self._lbl_uwagi = self._opis(p, "", 3, kolor=PRACA)
         self._opis(p, "Kliknij nazwę wielkości w tabeli, żeby zobaczyć jej dokładne objaśnienie.", 4)
@@ -666,7 +681,8 @@ class Aplikacja(ctk.CTk):
         self._przycisk(p, "Otwórz folder wyników", lambda: self._otworz_folder(self.a and self.a.folder), 7, blokowany=False)
         self._lbl_raport = self._opis(p, "", 8, kolor=("gray20", "gray80"))
         self._naglowek(p, "Podgląd obrazów raportu", 9)
-        self._wybor_obrazu = ctk.CTkSegmentedButton(p, values=["Zdjęcie", "Termowizja", "Nałożenie", "Zbliżenie"],
+        self._wybor_obrazu = ctk.CTkSegmentedButton(p, values=["Zdjęcie", "Termowizja", "Nałożenie", "Zbliżenie", "E2",
+                                                                "Piksele"],
                                                     command=self._pokaz_obraz_raportu)
         self._wybor_obrazu.set("Nałożenie")
         self._wybor_obrazu.grid(row=10, column=0, sticky="ew", padx=10, pady=4)
@@ -687,12 +703,14 @@ class Aplikacja(ctk.CTk):
     def _po_raporcie(self, wynik):
         self._raport, self._obrazy_raportu = wynik
         self._lbl_raport.configure(text=f"Zapisano:\n{self._wzgledna(self._raport)}\n+ metryki.json, "
-                                        f"{', '.join(n + '.png' for n in self._obrazy_raportu)}")
+                                        f"{', '.join(n + '.png' for n in self._obrazy_raportu)}"
+                                        + (", piksele_znamienia_termal.csv" if self.a.piksele is not None else ""))
         self._pokaz_pomiary()
         self._pokaz_obraz_raportu(self._wybor_obrazu.get())
 
     def _pokaz_obraz_raportu(self, nazwa):
-        klucz = {"Zdjęcie": "rgb", "Termowizja": "termal", "Nałożenie": "nakladka", "Zbliżenie": "nakladka_zblizenie"}[nazwa]
+        klucz = {"Zdjęcie": "rgb", "Termowizja": "termal", "Nałożenie": "nakladka", "Zbliżenie": "nakladka_zblizenie",
+                 "E2": "znacznik_modalnosci", "Piksele": "piksele_termal"}[nazwa]
         img = self._obrazy_raportu.get(klucz)
         if img is not None:
             self._pg_raport.ustaw(img, widok=(0, 0, img.shape[1], img.shape[0]))
@@ -744,6 +762,10 @@ class Aplikacja(ctk.CTk):
         if kadr_rgb:
             self._pg_prz_rgb.przybliz_jesli_calosc(kadr_rgb)
         ter_nak = []
+        if a.maska_znacznika_termal_unet is not None:
+            ks_u, _ = cv2.findContours((a.maska_znacznika_termal_unet > 0).astype(np.uint8), cv2.RETR_LIST,
+                                       cv2.CHAIN_APPROX_NONE)
+            ter_nak += [dict(pkt=k[:, 0, :].astype(np.float64), kolor=TURKUS, grubosc=3) for k in ks_u if len(k) >= 3]
         if nar_t_ref is not None:
             ter_nak.append(dict(pkt=nar_t_ref, kolor=FIOLET, punkty=True))
         pr = a.przeniesione
@@ -779,6 +801,15 @@ class Aplikacja(ctk.CTk):
             self._lbl_zn.configure(text=tekst)
         else:
             self._lbl_zn.configure(text="")
+        if a.maska_znacznika_termal_unet is not None:
+            tekst = f"{a.model_termal}: {int((a.maska_znacznika_termal_unet > 0).sum())} px termowizji"
+            e2 = (a.wyniki or {}).get("zgodnosc_modalnosci")
+            if e2:
+                tekst += (f"\nZgodność ze znacznikiem ze zdjęcia (E2): Dice folii {_f(e2['obrys']['dice'], 3)}, "
+                          f"Dice otworu {_f(e2['otwor']['dice'], 3)}")
+            self._lbl_unet.configure(text=tekst)
+        else:
+            self._lbl_unet.configure(text="")
         if pr is not None:
             ul = pr["ulamek"]
             s_t = geo.mm_na_px(a.H_termal, a.narozniki_termal.mean(0))

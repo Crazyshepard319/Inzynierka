@@ -8,7 +8,12 @@ RGB (maska znamienia + homografia px -> mm z naroznikow znacznika):
 Termowizja (maska przeniesiona z RGB + mapa °C):
     temperatura srednia (wazona ulamkiem pokrycia piksela), mediana, min, max, odchylenie, liczba pikseli
     (parametry_termiczne - nieuzywane w raporcie, bo pomiary temperatury z tej kamery nie sa wiarygodne).
+Termowizja - piksele znamienia (maska przeniesiona z RGB + surowa intensywnosc z nagrania .SEQ):
+    dla kazdego piksela termowizji objetego znamieniem: x, y (kolumna, wiersz), ulamek pokrycia i surowa
+    wartosc detektora; statystyki intensywnosci; zapis do CSV (piksele_znamienia_termal.csv).
 """
+import csv
+
 import cv2
 import numpy as np
 
@@ -83,3 +88,55 @@ def parametry_termiczne(T, ulamek_znamienia, mm_na_px):
             wynik.update(T_znamie_mediana=float(np.median(v)), T_znamie_min=float(v.min()),
                          T_znamie_max=float(v.max()), T_znamie_odchylenie=float(v.std()))
     return wynik
+
+
+PROG_PIKSELA = 0.5            # piksel nalezy do znamienia, gdy znamie pokrywa co najmniej polowe jego pola
+KOLUMNY_PIKSELI = ("x", "y", "ulamek", "w_masce", "intensywnosc")
+
+
+def piksele_znamienia(ulamek, intensywnosc, prog=PROG_PIKSELA):
+    """Piksele termowizji objete znamieniem przeniesionym ze zdjecia (ulamek pokrycia > 0), wierszami.
+    x - kolumna, y - wiersz piksela obrazu termowizyjnego (0, 0 = lewy gorny rog); ulamek - czesc pola piksela
+    pokryta przez znamie (wielokrotnosc 1/16, siatka 4x gestsza); w_masce - ulamek >= prog (jak maska binarna);
+    intensywnosc - surowa wartosc detektora z nagrania .SEQ (uint16, przed przeliczeniem na temperature)."""
+    ul = np.asarray(ulamek, np.float64)
+    I = np.asarray(intensywnosc)
+    if I.shape != ul.shape:
+        raise ValueError(f"intensywnosc {I.shape} i maska {ul.shape} maja rozne rozmiary")
+    ys, xs = np.nonzero(ul > 0)
+    u = ul[ys, xs]
+    return {"x": xs.astype(np.int32), "y": ys.astype(np.int32), "ulamek": u, "w_masce": u >= prog,
+            "intensywnosc": I[ys, xs].astype(np.int64)}
+
+
+def statystyki_intensywnosci(pk):
+    """Liczba pikseli i statystyki surowej intensywnosci pikseli w masce (w_masce); srednia wazona ulamkiem
+    pokrycia - po wszystkich pikselach objetych znamieniem."""
+    m, v = pk["w_masce"], pk["intensywnosc"][pk["w_masce"]].astype(np.float64)
+    st = {"piksele_w_masce": int(m.sum()), "piksele_czesciowe": int((~m).sum())}
+    if pk["ulamek"].sum() > 0:
+        st["intensywnosc_srednia_wazona"] = float((pk["ulamek"] * pk["intensywnosc"]).sum() / pk["ulamek"].sum())
+    if v.size:
+        st.update(intensywnosc_srednia=float(v.mean()), intensywnosc_mediana=float(np.median(v)),
+                  intensywnosc_min=float(v.min()), intensywnosc_max=float(v.max()),
+                  intensywnosc_odchylenie=float(v.std()))
+    return st
+
+
+def zapisz_piksele(sciezka, pk):
+    """CSV (separator ;, kropka dziesietna): x;y;ulamek;w_masce;intensywnosc - jeden wiersz na piksel."""
+    with open(sciezka, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f, delimiter=";")
+        w.writerow(KOLUMNY_PIKSELI)
+        for x, y, u, m, i in zip(*(pk[k] for k in KOLUMNY_PIKSELI)):
+            w.writerow((int(x), int(y), f"{u:.4f}", int(m), int(i)))
+
+
+def wczytaj_piksele(sciezka):
+    """Odwrotnosc zapisz_piksele (np. import wynikow do bazy)."""
+    with open(sciezka, encoding="utf-8-sig") as f:
+        r = list(csv.DictReader(f, delimiter=";"))
+    return {"x": np.array([int(w["x"]) for w in r], np.int32), "y": np.array([int(w["y"]) for w in r], np.int32),
+            "ulamek": np.array([float(w["ulamek"]) for w in r]),
+            "w_masce": np.array([w["w_masce"] == "1" for w in r], bool),
+            "intensywnosc": np.array([int(w["intensywnosc"]) for w in r], np.int64)}

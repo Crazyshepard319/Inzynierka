@@ -1,0 +1,64 @@
+erDiagram
+    ZNAMIE ||--o{ PARA : "ma zdjęcia"
+    PARA ||--o{ ADNOTACJA : "ma adnotacje CVAT"
+    PARA |o--o{ ANALIZA : "jest analizowana"
+    ANALIZA ||--o{ MIARA : "daje miary"
+    ANALIZA ||--o{ PIKSEL : "zapisuje piksele znamienia"
+    ZNAMIE {
+        int id PK "numer znamienia"
+        int fold "fold walidacji 1-5"
+        text opis
+    }
+    PARA {
+        int id PK "numer pary"
+        int znamie_id FK
+        text plik_rgb "dane/pary/N/rgb.jpg"
+        text plik_termal "dane/pary/N/termal.jpg"
+        text plik_termal_c "mapa temperatur °C (.npy)"
+        text oryginal_rgb "IMG_xxxx.heic"
+        text oryginal_termal "thermalNNNN.SEQ"
+        text data_zdjecia
+        int szer_rgb
+        int wys_rgb
+        int szer_termal
+        int wys_termal
+    }
+    ADNOTACJA {
+        int id PK
+        int para_id FK
+        text modalnosc "rgb lub termal"
+        text obiekt "znamię lub znacznik"
+        text plik_maski
+        text narozniki "JSON 8x2 px"
+        text homografia_mm "JSON 3x3"
+        real rms_mm
+        text zrodlo "CVAT"
+    }
+    ANALIZA {
+        int id PK
+        int para_id FK "NULL dla obrazów spoza bazy"
+        text data
+        text status "ok lub blad (błąd)"
+        text blad
+        text model_rejestracji
+        text macierz_T "JSON 3x3"
+        text model_znamienia "PanDerm M1"
+        text model_znacznika_termal "U-Net M3"
+        text folder_wynikow
+        text wersja_kodu "commit git"
+    }
+    MIARA {
+        int analiza_id PK, FK
+        text grupa PK "np. zgodnosc_modalnosci.otwor"
+        text nazwa PK "np. dice, hd95_mm"
+        real wartosc
+        text jednostka
+    }
+    PIKSEL {
+        int analiza_id PK, FK
+        int x PK "kolumna obrazu termowizyjnego"
+        int y PK "wiersz obrazu termowizyjnego"
+        real ulamek "pokrycie piksela przez znamię 0-1"
+        int w_masce "1 gdy ulamek >= 0,5"
+        int intensywnosc "surowa wartość z nagrania .SEQ"
+    }

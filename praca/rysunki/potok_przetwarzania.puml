@@ -1,0 +1,43 @@
+@startuml potok_przetwarzania
+!include styl.iuml
+skinparam ActivityBackgroundColor white
+skinparam ActivityBorderColor black
+start
+:1. Wejście
+zdjęcie RGB + obraz termowizyjny 320 × 240;
+:2. Rejestracja
+detekcja znacznika Π w obu modalnościach,
+wstępne dopasowanie (środek, skala, kąt),
+doprecyzowanie ECC (afiniczne / homografia);
+note right: wynik: macierz T\n(piksel zdjęcia → piksel termowizji)
+fork
+  :3a. Narożniki znacznika
+  (wzorzec Π, 8 punktów)
+  → skala [mm] w obu obrazach;
+fork again
+  :3b. Segmentacja znamienia
+  na zdjęciu (M1: PanDerm + UperNet,
+  we wnętrzu znacznika);
+fork again
+  :3c. Segmentacja znacznika
+  na termowizji (M3: U-Net),
+  niezależnie od rejestracji;
+end fork
+:4. Przeniesienie ROI przez T
+znamię, obrys i otwór znacznika: zdjęcie → termowizja;
+:5. Pomiary i zgodność
+wymiary i barwa znamienia [mm, Lab],
+E2: maska znacznika ze zdjęcia (przez T) vs maska z M3
+(Dice, IoU, HD95, ASSD),
+piksele znamienia na termowizji:
+x, y i surowa intensywność z nagrania .SEQ;
+if (para ma adnotacje CVAT?) then (tak)
+  :ocena względem wzorca:
+  E1 (TRE), segmentacja M1 i M3;
+else (nie)
+endif
+:6. Raport
+raport.html, metryki.json, obrazy PNG, CSV pikseli
++ zapis analizy, miar i pikseli w bazie SQLite;
+stop
+@enduml

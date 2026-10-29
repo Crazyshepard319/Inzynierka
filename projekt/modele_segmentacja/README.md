@@ -1,6 +1,7 @@
 # Modele segmentacji znamion
 
-Folder z modelami do segmentacji znamienia na zdjęciu RGB i aplikacja do ich testowania.
+Folder z modelami do segmentacji znamienia na zdjęciu RGB (PanDerm, model M1) i aplikacja do ich testowania
+oraz model U-Net segmentujący znacznik na termowizji (model M3, `unet_termal/`, opis niżej).
 Każdy model ma ten sam interfejs, więc wybrany model łatwo podłączyć do aplikacji
 dopasowania RGB ↔ termowizja (`aplikacja.py`, `dopasowanie3.py`).
 
@@ -11,7 +12,7 @@ dopasowania RGB ↔ termowizja (`aplikacja.py`, `dopasowanie3.py`).
 | Kod, adaptery, aplikacja testowa | `Inzynierka/projekt/modele_segmentacja/` (OneDrive, git) |
 | Sklonowane repozytoria autorów | `modele_segmentacja/repozytoria/` (poza gitem) |
 | Środowisko Pythona 3.12 + PyTorch (CUDA) | `C:\Users\groch\modele_dane\srodowisko\` |
-| Wagi modeli | `C:\Users\groch\modele_dane\wagi\<model>\` |
+| Wagi modeli | `C:\Users\groch\modele_dane\wagi\<model>\` (U-Net: `wagi\unet_termal\`, ok. 90 MB) |
 | Zbiory danych (ISIC 2018) | `C:\Users\groch\modele_dane\dane\` |
 | Wyniki z aplikacji testowej i treningu | `Inzynierka/wyniki/wyniki_segmentacji/` (`wyniki.csv` + foldery z maskami) |
 
@@ -146,6 +147,61 @@ Odtworzenie procedury autorów (`modele/panderm_upernet/`):
 3. Najlepszy model zapisuje się w `modele_dane\wagi\panderm_upernet\model_najlepszy.pth`,
    a log epok (strata, Dice, Jaccard) w `...\przebiegi\<data>\log.csv`.
    Od tej chwili PanDerm jest dostępny w aplikacji testowej.
+
+## Znacznik na termowizji: U-Net (model M3)
+
+Znamienia na termowizji nie widać, więc modelem dedykowanym tej modalności jest segmentacja **znacznika Π**
+(folii) na obrazie termowizyjnym (`unet_termal/`). Model nie bierze udziału w rejestracji (macierz T liczy
+`dopasowanie3.py` z detektora klasycznego), dlatego porównanie jego maski z maską znacznika przeniesioną ze
+zdjęcia przez T jest niezależną weryfikacją zgodności obszaru między modalnościami (**badanie E2**, `analiza/system.py`).
+
+| | |
+|---|---|
+| Dane | 94 obrazy termowizyjne 320 × 240 (`dane/pary/N/termal.jpg`) i maski znacznika z CVAT (`maska_znacznik_termal.png`) |
+| Podział | walidacja krzyżowa 5-krotna **po znamionach** (`dane/znamiona.csv`, 34 znamiona) – test nie widzi znamienia z treningu |
+| Wejście | 1 kanał: skala szarości jak w `dopasowanie3.wczytaj_termal`, standaryzacja każdego obrazu (średnia 0, odchylenie 1) |
+| Architektura | U-Net (Ronneberger i in. 2015): 4 poziomy, kanały 16–32–64–128, dno 256, ConvTranspose 2×2; 1,94 mln parametrów |
+| Augmentacja | obrót 0–360°, skala 0,75–1,3, przesunięcie ±15%, odbicia, gamma 0,7–1,5, kontrast ±20%, rozmycie, szum |
+| Trening | BCE + (1 − miękki Dice), AdamW lr 2·10⁻³, wd 10⁻⁴, cosinus, paczka 8, **60 epok bez wyboru epoki na teście** |
+| Wyjście | prawdopodobieństwo → próg 0,5 → największa składowa → wypełnienie dziur < 2% pola |
+| Wnioskowanie | ONNX przez `cv2.dnn` (bez PyTorch – działa w aplikacji); różnica względem PyTorch < 10⁻⁶ |
+
+**Uruchomienie:**
+
+1. `trenuj_unet_termal.bat` – 5 foldów + model końcowy (GPU: kilka minut; CPU: ok. 1 h). Sam doinstaluje
+   pakiet `onnx` (potrzebny do eksportu). Wynik: `modele_dane\wagi\unet_termal\fold1..5.onnx`, `wszystkie.onnx`
+   (+ `.pth`), logi i ocena walidacji krzyżowej w `wyniki/wyniki_segmentacji/unet_termal/trening_<data>/`.
+   Szybki test: `trenuj_unet_termal.bat --proba`.
+2. `ocen_unet_termal.bat` – ocena na wszystkich parach z CVAT: U-Net (model foldu pary) i detektor klasyczny
+   z rejestracji → `wyniki/wyniki_segmentacji/unet_termal/ocena_<data>/` (`ocena.csv`, `podsumowanie.txt`,
+   `tabela.tex`).
+
+System wybiera model sam: para z bazy → model foldu, w którym para była testowa (nie widział jej w treningu);
+inne obrazy → `wszystkie.onnx`.
+
+```python
+from modele_segmentacja.unet_termal import wczytaj
+model, opis = wczytaj(fold=3)                 # albo wczytaj() - model ze wszystkich par
+maska = model.segmentuj(obraz_termal_bgr)     # uint8 0/255, rozmiar obrazu
+```
+
+**Wyniki (26.10.2026, 94 pary, walidacja krzyżowa po znamionach, `ocen_unet_termal.bat`):**
+
+| względem maski z CVAT | U-Net M3 | detektor klasyczny (rejestracja) |
+|---|---|---|
+| Dice | **0,969 ± 0,008** (mediana 0,970, min 0,937) | 0,954 ± 0,017 (mediana 0,959, min 0,878) |
+| IoU | 0,939 ± 0,015 | 0,913 ± 0,031 |
+| HD95 | **0,68 ± 0,27 mm** (mediana 0,62) | 1,06 ± 0,59 mm (mediana 0,83) |
+| ASSD | 0,23 ± 0,06 mm | 0,32 ± 0,12 mm |
+| stosunek pól (metoda / CVAT) | 1,004 ± 0,030 | 0,950 ± 0,044 (zaniża brzeg folii) |
+
+Dice testu w poszczególnych foldach: 0,970 / 0,968 / 0,968 / 0,968 / 0,970. Trening na CPU (2 rdzenie):
+ok. 11 s/epokę, 60 epok × 6 modeli ≈ 70 min.
+
+**Badanie E2 w systemie** (92 pary, maska ze zdjęcia przez T vs U-Net, bez CVAT): Dice folii mediana 0,966,
+Dice otworu (ROI) mediana 0,960, HD95 otworu mediana 0,88 mm. Najniższe E2 mają dokładnie pary z największym
+błędem rejestracji wg CVAT: 78 (Dice folii 0,72; TRE 24,7 mm), 8 (0,86; 2,3 mm) i 79 (0,89; 1,9 mm) –
+korelacja rang E2 z TRE ok. −0,72. E2 wykrywa więc błędną rejestrację bez adnotacji.
 
 ## Podłączenie do aplikacji dopasowania
 

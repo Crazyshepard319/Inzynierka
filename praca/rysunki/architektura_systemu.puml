@@ -1,0 +1,55 @@
+@startuml architektura_systemu
+!include styl.iuml
+skinparam componentStyle rectangle
+skinparam nodesep 25
+skinparam ranksep 45
+top to bottom direction
+
+package "Warstwa prezentacji" {
+  [Aplikacja okienkowa\n(aplikacja.py,\n6 zakładek = 6 etapów)] as GUI
+  [Przetwarzanie wsadowe\n(potok_pary.py,\nraport_zbiorczy.py)] as WSAD
+}
+
+package "Warstwa logiki" {
+  [Analiza pary\n(analiza/system.py, klasa Analiza):\nwejście → rejestracja → segmentacja →\nprzeniesienie ROI → pomiary → raport] as POTOK
+}
+
+package "Moduły obliczeniowe (środowisko aplikacji)" {
+  [Rejestracja\n(dopasowanie3.py)\nznacznik Π, ECC\n→ macierz T] as REJ
+  [Segmentacja znacznika\nna termowizji\nU-Net M3 (ONNX,\nOpenCV dnn)] as M3
+  [Przeniesienie ROI,\npomiary, miary\nzgodności\n(geometria, pomiary,\nmiary)] as GEO
+  [Raport\nHTML, JSON, PNG\n(raport.py,\nobrazy.py)] as RAP
+}
+
+package "Środowisko modeli (PyTorch)" {
+  [Segmentacja znamienia\nPanDerm + UperNet M1\n(segmentuj_znamie.py)] as M1
+  [Trening modeli\nM1 i M3] as TREN
+}
+
+package "Warstwa danych" {
+  folder "Pliki: obrazy, maski,\nnagrania .SEQ,\nadnotacje, wyniki" as PLIKI
+  database "Baza SQLite\n(dane/baza.sqlite)" as DB
+  folder "Wagi modeli\n(.pth, .onnx)" as WAGI
+}
+
+[CVAT\n(adnotacje ręczne,\ntylko do oceny)] as CVAT
+
+GUI --> POTOK
+WSAD --> POTOK
+POTOK --> REJ
+POTOK --> M3
+POTOK --> GEO
+POTOK --> RAP
+POTOK ..> M1 : osobny\nproces
+M1 -[hidden]down- TREN
+REJ -[hidden]right- M3
+M3 -[hidden]right- GEO
+GEO -[hidden]right- RAP
+REJ --> PLIKI
+RAP --> PLIKI
+POTOK --> DB : zapis analiz\ni miar
+M3 --> WAGI : wczytuje
+M1 --> WAGI : wczytuje
+TREN --> WAGI : zapisuje
+CVAT ..> PLIKI : import_cvat.py
+@enduml

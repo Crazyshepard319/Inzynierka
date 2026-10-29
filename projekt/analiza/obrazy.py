@@ -5,6 +5,10 @@ Obrazy do raportu pary (BGR, uint8):
     nakladka            termowizja nalozona na zdjecie (50 %) z obrysami znacznika i znamienia
     nakladka_zblizenie  to samo w powiekszeniu wokol znamienia; termowizja bez wygladzania, wiec widac
                         jej piksele, i podzialka w mm
+    znacznik_modalnosci badanie E2: maska znacznika ze zdjecia przeniesiona przez T i maska z U-Netu na
+                        termowizji (siatka 4x), z otworami (ROI) obu masek
+    piksele_termal      piksele termowizji objete znamieniem: surowa intensywnosc z nagrania .SEQ, siatka
+                        pikseli kamery, piksele w masce i wspolrzedne x, y (gdy jest nagranie)
 Znamie z segmentacji (PanDerm) - czerwone; gdy para ma adnotacje z CVAT, znamie z CVAT - niebieskie (cienkie).
 """
 import cv2
@@ -14,6 +18,8 @@ from . import geometria as geo
 
 ZIELONY, CZERWONY, FIOLET = (0, 200, 0), (0, 0, 255), (255, 0, 255)
 NIEBIESKI, BIALY, CZARNY = (255, 160, 0), (255, 255, 255), (0, 0, 0)
+TURKUS = (255, 229, 0)      # maska znacznika z U-Netu (termowizja) - kontrastuje z paleta inferno
+ZOLTY = (0, 220, 255)       # piksele termowizji w masce znamienia
 
 
 def napis(img, tekst, xy, skala=0.6):
@@ -104,6 +110,8 @@ def rysuj(a):
     nar_ref = a.wzorzec["narozniki_termal"] if a.wzorzec is not None else a.narozniki_termal
     if nar_ref is not None:
         _linie(t, [nar_ref], d, FIOLET, 2)
+    if a.maska_znacznika_termal_unet is not None:
+        _linie(t, brzegi(a.maska_znacznika_termal_unet > 0), d, TURKUS, 3)
     _linie(t, [pr["narozniki"]], d, ZIELONY, 2)
     _linie(t, [(kk + 0.5) / 4 - 0.5 for kk in geo.kontury(pr["znamie_gesta"].astype(np.uint8))], d, CZERWONY, 2)
     if a.wzorzec is not None:              # blad rejestracji: narozniki z CVAT (zdjecie -> T) vs z CVAT na termowizji
@@ -131,4 +139,77 @@ def rysuj(a):
     _linie(nal, kontury_rgb, tr, CZERWONY, 2)
     _podzialka(nal, s * (rk[2] - rk[0]) / 600)
     ob["nakladka_zblizenie"] = nal
+    if getattr(a, "_maski_e2", None) is not None:
+        ob["znacznik_modalnosci"] = obraz_e2(a)
+    if getattr(a, "piksele", None) is not None and len(a.piksele["x"]):
+        ob["piksele_termal"] = obraz_pikseli(a)
     return ob
+
+
+def obraz_pikseli(a, szer=600, margines=3):
+    """Kadr termowizji wokol znamienia: surowa intensywnosc (szarosci rozciagniete na zakres kadru), kazdy piksel
+    kamery jako kwadrat z siatka; zolte ramki - piksele w masce (pokrycie >= 50 %), czerwona linia - znamie
+    przeniesione ze zdjecia; na brzegach wspolrzedne x (kolumna) i y (wiersz) pikseli."""
+    pk, I = a.piksele, a.intensywnosc
+    h, w = I.shape
+    x0, x1 = max(0, int(pk["x"].min()) - margines), min(w, int(pk["x"].max()) + margines + 1)
+    y0, y1 = max(0, int(pk["y"].min()) - margines), min(h, int(pk["y"].max()) + margines + 1)
+    kadr = I[y0:y1, x0:x1].astype(np.float64)
+    lo, hi = float(kadr.min()), float(kadr.max())
+    g = np.round((kadr - lo) / max(hi - lo, 1.0) * 255).astype(np.uint8)
+    z = max(8, szer // (x1 - x0))                                     # piksele obrazu na piksel kamery
+    img = cv2.cvtColor(cv2.resize(g, None, fx=z, fy=z, interpolation=cv2.INTER_NEAREST), cv2.COLOR_GRAY2BGR)
+    for i in range(x1 - x0 + 1):
+        cv2.line(img, (min(i * z, img.shape[1] - 1), 0), (min(i * z, img.shape[1] - 1), img.shape[0] - 1), (110, 110, 110), 1)
+    for j in range(y1 - y0 + 1):
+        cv2.line(img, (0, min(j * z, img.shape[0] - 1)), (img.shape[1] - 1, min(j * z, img.shape[0] - 1)), (110, 110, 110), 1)
+    gr = max(1, z // 12)
+    for x, y, m in zip(pk["x"].tolist(), pk["y"].tolist(), pk["w_masce"].tolist()):
+        if m:
+            cv2.rectangle(img, ((x - x0) * z + 2 * gr, (y - y0) * z + 2 * gr),
+                          ((x - x0 + 1) * z - 2 * gr - 1, (y - y0 + 1) * z - 2 * gr - 1), ZOLTY, gr)
+    d = lambda p: ((np.asarray(p, np.float64) + 0.5) / 4 - 0.5 - [x0, y0] + 0.5) * z     # siatka 4x -> kadr
+    _linie(img, geo.kontury(a.przeniesione["znamie_gesta"].astype(np.uint8)), d, CZERWONY, max(2, z // 10))
+    # brzegi z opisami: x u gory, y z lewej, zakres intensywnosci na dole
+    gora, lewa, dol = 26, 46, 30
+    img = cv2.copyMakeBorder(img, gora, dol, lewa, 8, cv2.BORDER_CONSTANT, value=BIALY)
+    co = int(np.ceil(34 / z))                                         # co ile pikseli podpis
+    for i in range(0, x1 - x0, co):
+        t = str(x0 + i)
+        (tw, _), _ = cv2.getTextSize(t, cv2.FONT_HERSHEY_SIMPLEX, 0.42, 1)
+        cv2.putText(img, t, (lewa + i * z + (z - tw) // 2, gora - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.42, CZARNY, 1, cv2.LINE_AA)
+    for j in range(0, y1 - y0, co):
+        t = str(y0 + j)
+        (tw, th), _ = cv2.getTextSize(t, cv2.FONT_HERSHEY_SIMPLEX, 0.42, 1)
+        cv2.putText(img, t, (lewa - tw - 6, gora + j * z + (z + th) // 2), cv2.FONT_HERSHEY_SIMPLEX, 0.42, CZARNY, 1, cv2.LINE_AA)
+    cv2.putText(img, "x", (lewa - 16, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.45, CZARNY, 1, cv2.LINE_AA)
+    cv2.putText(img, "y", (6, gora + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.45, CZARNY, 1, cv2.LINE_AA)
+    st = (a.wyniki or {}).get("piksele_termal") or {}
+    opis = (f"intensywnosc surowa: czarny {lo:.0f}, bialy {hi:.0f}; w masce {st.get('piksele_w_masce', '-')} px, "
+            f"mediana {st.get('intensywnosc_mediana', float('nan')):.0f}")
+    cv2.putText(img, opis, (lewa, img.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.45, CZARNY, 1, cv2.LINE_AA)
+    return img
+
+
+def obraz_e2(a, szer=800):
+    """Termowizja w siatce 4x wokol znacznika: maska ze zdjecia (przez T) i z U-Netu, kolorami wg pokrycia."""
+    A, B, wa, wb = a._maski_e2
+    g = A.shape[0] // a.termal.shape[0]
+    t = cv2.resize(a.termal, (A.shape[1], A.shape[0]), interpolation=cv2.INTER_CUBIC)
+    t = (0.55 * t).astype(np.uint8)
+    for maska, kolor in ((A & B, BIALY), (A & ~B, ZIELONY), (B & ~A, TURKUS)):
+        t[maska] = (0.45 * t[maska] + 0.55 * np.array(kolor)).astype(np.uint8)
+    _linie(t, brzegi(wa), lambda p: p, ZIELONY, max(1, g // 2))          # otwor maski ze zdjecia
+    _linie(t, brzegi(B), lambda p: p, TURKUS, g)                         # obrys folii z U-Netu
+    _linie(t, brzegi(wb), lambda p: p, TURKUS, g)                        # otwor maski z U-Netu
+    y, x = np.nonzero(A | B)
+    x0, y0, x1, y1 = ramka(np.c_[x, y], t.shape, 0.15)
+    k = t[y0:y1, x0:x1]
+    k = cv2.resize(k, (szer, max(1, int(round(k.shape[0] * szer / max(1, k.shape[1]))))), interpolation=cv2.INTER_NEAREST)
+    e2 = (a.wyniki or {}).get("zgodnosc_modalnosci") or {}
+    if e2:
+        tekst = f"E2: Dice folii {e2['obrys']['dice']:.3f}, Dice otworu {e2['otwor']['dice']:.3f}"
+        (tw, th), _ = cv2.getTextSize(tekst, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+        cv2.rectangle(k, (6, 6), (18 + tw, 20 + th), CZARNY, -1)
+        cv2.putText(k, tekst, (12, 12 + th), cv2.FONT_HERSHEY_SIMPLEX, 0.7, BIALY, 2, cv2.LINE_AA)
+    return k

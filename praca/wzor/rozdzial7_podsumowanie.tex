@@ -1,0 +1,45 @@
+% =====================================================================
+% Rozdział 7 – Podsumowanie (WZÓR, ok. 1,5 strony)
+% Styl bezosobowy; bez nowych wyników. Plan i zwroty: materialy/06_plan_zwroty_rozdzialy_4_7.md.
+% =====================================================================
+
+\chapter{Podsumowanie}
+\label{chap:podsumowanie}
+
+\section{Realizacja celu pracy}
+\label{sec:realizacja}
+
+Celem pracy było opracowanie, implementacja oraz ocena systemu umożliwiającego rejestrację i wspólną analizę zdjęcia RGB wykonanego telefonem i obrazu termowizyjnego zmiany skórnej. Cel ten został osiągnięty, a zadania wymienione w podrozdziale~\ref{sec:cel} zrealizowano w następujący sposób:
+\begin{itemize}
+  \item na podstawie przeglądu literatury przyjęto rejestrację opartą na znaczniku widocznym w obu modalnościach i ocenę błędem TRE oraz miarami zgodności masek;
+  \item zaprojektowano system w architekturze potokowej (przypadki użycia, architektura, diagram klas, interfejs) oraz bazę danych SQLite z sześcioma tabelami, przechowującą zbiór, adnotacje, wyniki analiz i piksele znamion;
+  \item zaprojektowano znacznik $\Pi$, zebrano zbiór 94 par obrazów 34 znamion i wykonano ich adnotacje;
+  \item zaimplementowano moduł rejestracji, modele segmentacji dla obu modalności (M1 -- znamię na zdjęciu, M3 -- znacznik na obrazie termowizyjnym), przeniesienie obszarów z pomiarami w milimetrach, miary zgodności oraz zapis współrzędnych i surowej intensywności pikseli znamienia;
+  \item przygotowano aplikację z interfejsem graficznym, przetwarzanie wsadowe i raporty;
+  \item przeprowadzono weryfikację systemu (badania E1, E2, E4, ocena segmentacji, testy funkcjonalne) oraz przygotowano instrukcję użytkownika i dokumentację techniczną (Dodatki~A i~B).
+\end{itemize}
+Wszystkie wymagania funkcjonalne o priorytecie \emph{wymagane} zostały zrealizowane, a kryteria akceptacji wymagań pozafunkcjonalnych WN1, WN4 i WN5 -- spełnione.
+
+\section{Wnioski}
+\label{sec:wnioski}
+
+Najważniejsze wnioski z pracy są następujące:
+\begin{enumerate}
+  \item Znacznik referencyjny widoczny w obu modalnościach pozwala zarejestrować zdjęcie z telefonu i obraz termowizyjny z niezależnych urządzeń z medianą błędu 0,61~mm, czyli około dwóch pikseli kamery termowizyjnej; w 85\% par błąd nie przekroczył 1~mm.
+  \item Maksymalizacja kryterium ECC na maskach znacznika jest wyraźnie dokładniejsza od rejestracji na intensywnościach z użyciem informacji wzajemnej (mediana TRE 0,61~mm wobec 3,36~mm), ponieważ nie zależy od związku między intensywnościami obu modalności.
+  \item Niewielka sieć U-Net uczona na 94 obrazach wystarcza do segmentacji znacznika na obrazie termowizyjnym (współczynnik Dice'a 0,969), a porównanie jej maski z maską przeniesioną ze zdjęcia (badanie E2) pozwala bez adnotacji wskazać pary z nieudaną rejestracją.
+  \item Model bazowy douczony na obrazach dermatoskopowych może segmentować znamiona na zdjęciach z telefonu (współczynnik Dice'a 0,870) pod warunkiem ograniczenia obszaru do wnętrza znacznika i doboru kadru zgodnego z danymi uczącymi; model zawyża jednak pole znamienia.
+  \item System dostarcza dla każdego znamienia listę pikseli obrazu termowizyjnego z ich współrzędnymi i surową intensywnością. W obrazach statycznych, wykonanych bez schłodzenia skóry, zmienność intensywności w obrębie znamienia jest niewielka (około 0,07~°C), co uzasadnia rozszerzenie badań o termografię dynamiczną.
+\end{enumerate}
+
+\section{Kierunki dalszych prac}
+\label{sec:dalsze-prace}
+
+Ograniczenia opisane w podrozdziale~\ref{sec:dyskusja} wyznaczają kierunki dalszych prac:
+\begin{itemize}
+  \item rozszerzenie systemu o termografię dynamiczną -- rejestrację sekwencji obrazów po schłodzeniu skóry i analizę zmian intensywności pikseli znamienia w czasie;
+  \item douczenie modelu M1 na zdjęciach z telefonu z walidacją krzyżową według znamion, aby ograniczyć zawyżanie pola znamienia;
+  \item przerywanie analizy, gdy znacznik na obrazie termowizyjnym jest wykryty niepewnie, oraz automatyczne oznaczanie par z niską zgodnością w badaniu E2;
+  \item zebranie kolejnych serii pomiarowych z udziałem większej liczby osób, urządzeń i oznaczających, co pozwoli ocenić zmienność adnotacji i uogólnienie modeli;
+  \item przeliczanie intensywności na temperaturę z kalibracją kamery oraz ocena użyteczności systemu z udziałem lekarzy.
+\end{itemize}

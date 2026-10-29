@@ -69,6 +69,24 @@ OBJASNIENIA = [
          "z definicji maksymalizuje tę zgodność, więc wartość jest zawsze wysoka (ok. 0,95–0,99) i pokazuje tylko, "
          "czy optymalizacja zbiegła. Nie jest niezależną oceną – tą jest porównanie z CVAT."),
     ]),
+    ("Zgodność masek między modalnościami (E2)", [
+        ("e2", "Badanie E2 – maski z dwóch modalności",
+         "Weryfikacja zgodności tego samego obszaru bez adnotacji: każda modalność ma własną metodę segmentacji "
+         "znacznika. Na zdjęciu folię wykrywa detektor z rejestracji (barwa, tekstura, GrabCut), na termowizji – "
+         "model U-Net (M3) uczony na obrazach termowizyjnych. Maska ze zdjęcia jest przenoszona przez T na "
+         "termowizję (A) i porównywana z maską z U-Netu (B) w siatce 4× gęstszej niż piksele termowizji. Otwór "
+         "znacznika (ROI) to otoczka wypukła maski minus folia, liczony tak samo dla A i B. U-Net nie bierze udziału "
+         "w wyznaczaniu T, więc – inaczej niż wewnętrzna kontrola rejestracji – porównanie nie jest wysokie z "
+         "założenia: rozbieżność oznacza błąd rejestracji albo segmentacji w jednej z modalności."),
+        ("unet", "Model U-Net (M3)",
+         "Sieć U-Net (koder–dekoder z połączeniami skrótowymi, ok. 1,9 mln parametrów) segmentująca folię znacznika "
+         "na obrazie termowizyjnym 320 × 240. Uczona na maskach z CVAT, walidacja krzyżowa 5-krotna po znamionach. "
+         "Dla pary z bazy używany jest model foldu, w którym ta para była testowa (nie widział jej w treningu); "
+         "dla innych obrazów – model uczony na wszystkich parach. Działa w aplikacji przez OpenCV (plik ONNX)."),
+        ("seg_t", "Segmentacja znacznika na termowizji a CVAT",
+         "Maska znacznika na termowizji z U-Netu i z detektora klasycznego (używanego w rejestracji) porównana z "
+         "maską oznaczoną ręcznie w CVAT: Dice, IoU, HD95, ASSD w mm (skala z narożników z CVAT). Ocena modelu M3."),
+    ]),
     ("Zgodność między modalnościami", [
         ("tre", "TRE – błąd położenia narożników",
          "Target Registration Error. Dla każdego z 8 narożników znacznika: narożnik oznaczony ręcznie (CVAT) na zdjęciu "
@@ -125,6 +143,21 @@ OBJASNIENIA = [
          "Ile pikseli termowizji obejmuje przeniesione znamię (piksele częściowo pokryte liczą się ułamkiem) oraz "
          "ile milimetrów skóry przypada na jeden piksel kamery (320 × 240; w tych danych ok. 0,2 mm). Przy kilku–"
          "kilkunastu pikselach pomiar na termowizji w obrębie znamienia byłby mało pewny."),
+    ]),
+    ("Piksele znamienia na termowizji", [
+        ("piksele", "Piksele znamienia: x, y, intensywność",
+         "Maska znamienia ze zdjęcia przeniesiona przez T na obraz termowizyjny (siatka 4× gęstsza) wyznacza, "
+         "jaką część pola każdego piksela termowizji pokrywa znamię (<b>ułamek</b>, 0–1). Dla każdego piksela "
+         "objętego znamieniem zapisywane są: <b>x</b> – kolumna i <b>y</b> – wiersz piksela obrazu termowizyjnego "
+         "(0, 0 = lewy górny róg, piksele kamery 320 × 240), ułamek pokrycia i <b>intensywność</b> – surowa "
+         "wartość detektora z nagrania .SEQ (liczba całkowita, przed przeliczeniem na temperaturę i bez palety "
+         "barw i normalizacji obrazu podglądu). Piksel należy do znamienia (<b>w masce</b>), gdy znamię pokrywa "
+         "co najmniej połowę jego pola – jak przy przeniesieniu maski binarnej. Statystyki (średnia, mediana, "
+         "min., maks., odchylenie standardowe) liczone są dla pikseli w masce; średnia ważona ułamkiem – dla "
+         "wszystkich objętych pikseli. Pełna lista pikseli: plik <code>piksele_znamienia_termal.csv</code> "
+         "(x;y;ulamek;w_masce;intensywnosc) i tabela <code>piksel</code> w bazie. Znamię bez schłodzenia skóry "
+         "nie jest widoczne na termowizji, więc położenie pikseli wynika tylko z rejestracji: przy błędzie "
+         "rejestracji rzędu 0,5–1 mm (2–4 piksele termowizji) piksele brzegowe mogą należeć do skóry obok znamienia."),
     ]),
     ("Znamię na zdjęciu RGB", [
         ("skala", "Skala (mm/px)",
@@ -202,6 +235,10 @@ def uwagi(w):
     odch = ks["stosunek_pol_otworu"] - 1
     if abs(odch) > 0.10:
         u.append(f"Pole otworu przeniesionego ze zdjęcia różni się od wyznaczonego na termowizji o {_f(100 * odch, 0)}%.")
+    e2 = w.get("zgodnosc_modalnosci")
+    if e2 and e2["obrys"]["dice"] < 0.85:
+        u.append(f"Zgodność masek znacznika między modalnościami (E2) niska: Dice {_f(e2['obrys']['dice'], 3)} < 0,85 – "
+                 f"sprawdź nałożenie i maskę U-Netu.")
     rej = w.get("rejestracja", {})
     for k, nazwa in (("zgodnosc_rgb", "na zdjęciu"), ("zgodnosc_termal", "na termowizji")):
         if rej.get(k) is not None and rej[k] < 0.65:
@@ -211,6 +248,10 @@ def uwagi(w):
             u.append(f"Automatyczne narożniki {nazwa} są niepewne (IoU wzorca {_f(nar[k])}).")
     if not (0.85 <= ks["pole_znamienia_termal_do_rgb"] <= 1.15):
         u.append("Pole znamienia na termowizji różni się od pola na zdjęciu o ponad 15%.")
+    pt = w.get("piksele_termal")
+    if pt is not None and "piksele_w_masce" not in pt:
+        u.append(f"Brak surowej intensywności termowizji ({pt.get('zrodlo') or 'brak nagrania .SEQ'}) – "
+                 f"nie zapisano pikseli znamienia.")
     return u
 
 
@@ -220,6 +261,24 @@ def sekcje(w):
     rej, zg, rgb = w["rejestracja"], w.get("zgodnosc"), w["pomiary_rgb"]
     ks, zr, nar = w["kontrola_skali"], w["zrodla"], w.get("narozniki", {})
     wynik = []
+    e2 = w.get("zgodnosc_modalnosci")
+    if e2:
+        o, t = e2["obrys"], e2["otwor"]
+        wynik.append(("Zgodność masek między modalnościami (badanie E2)",
+                      "A – znacznik (folia) wykryty na zdjęciu i przeniesiony przez T; B – znacznik wyznaczony na "
+                      f"termowizji modelem dedykowanym tej modalności ({e2.get('model_termal') or '-'}), który nie bierze "
+                      "udziału w rejestracji. Otwór = wnętrze znacznika (ROI, w którym leży znamię). Bez adnotacji z CVAT.", [
+            ("e2", "Dice folii", _f(o['dice'], 3), "pokrycie masek znacznika z obu modalności"),
+            ("iou", "IoU folii", _f(o['iou'], 3), ""),
+            ("hd95", "HD95 folii", f"{_f(o.get('hd95_mm'))} mm", "kontury w najgorszych miejscach"),
+            ("assd", "ASSD folii", f"{_f(o.get('assd_mm'))} mm", "średnia odległość konturów"),
+            ("e2", "Dice otworu (ROI)", _f(t['dice'], 3), "pokrycie obszaru, z którego liczy się parametry ROI"),
+            ("hd95", "HD95 otworu", f"{_f(t.get('hd95_mm'))} mm", ""),
+            ("srodki", "Przesunięcie środków otworu", f"{_f(t.get('przesuniecie_srodkow_mm'))} mm", "o ile ROI trafia obok"),
+            ("pola", "Pole otworu: zdjęcie → T / U-Net",
+             f"{_f(e2.get('pole_otworu_przeniesionego_mm2'), 1)} / {_f(e2.get('pole_otworu_unet_mm2'), 1)} mm²",
+             f"stosunek {_f(t['stosunek_pol'], 3)}; nominalnie 289 mm²"),
+        ]))
     if zg:
         wynik.append(("Zgodność między modalnościami (badanie E1)",
                       "Ocena samej rejestracji: znacznik oznaczony ręcznie w CVAT na zdjęciu przeniesiony przez T (A) "
@@ -237,9 +296,9 @@ def sekcje(w):
         ]))
     else:
         wynik.append(("Zgodność między modalnościami (badanie E1)",
-                      "Te obrazy nie mają adnotacji z CVAT, więc nie ma wzorca do niezależnej oceny. Po wytrenowaniu "
-                      "modeli znacznika M2 (zdjęcie) i M3 (termowizja) w tym miejscu będzie zgodność ich masek (E2, E3). "
-                      "Kontrolą bez wzorca jest stosunek pól otworu niżej.", []))
+                      "Te obrazy nie mają adnotacji z CVAT, więc nie ma wzorca do oceny samej rejestracji. Zgodność "
+                      "bez wzorca pokazuje badanie E2 wyżej (maska z termowizji z modelu U-Net) oraz stosunek pól "
+                      "otworu w kontroli skali.", []))
     wynik.append(("Rejestracja", None, [
         ("model", "Model rejestracji", _f(rej.get('model')), "rodzaj przekształcenia T"),
         ("wewn", "Wewnętrzna kontrola: Dice", _f(rej.get('dice_wewnetrzny'), 4), "maski, na których liczono T – nie jest niezależną oceną"),
@@ -270,6 +329,35 @@ def sekcje(w):
             ("srodki", "Przesunięcie środków", f"{_f(seg.get('przesuniecie_srodkow_mm'))} mm", ""),
             ("pola", "Stosunek pól", _f(seg['stosunek_pol'], 3), "PanDerm / adnotacja; > 1 = PanDerm zawyża"),
         ]))
+    st = w.get("segmentacja_termal_vs_cvat")
+    if st and (st.get("unet") or st.get("klasyczny")):
+        wiersze = []
+        for k, nazwa in (("unet", "U-Net (M3)"), ("klasyczny", "Detektor klasyczny (rejestracja)")):
+            z = st.get(k)
+            if z:
+                wiersze += [("seg_t", f"{nazwa}: Dice / IoU", f"{_f(z['dice'], 3)} / {_f(z['iou'], 3)}", "pokrycie z maską z CVAT"),
+                            ("hd95", f"{nazwa}: HD95 / ASSD", f"{_f(z.get('hd95_mm'))} / {_f(z.get('assd_mm'))} mm", "")]
+        wynik.append(("Segmentacja znacznika na termowizji a adnotacja z CVAT", None, wiersze))
+    pt = w.get("piksele_termal")
+    if pt is not None:
+        if "piksele_w_masce" in pt:
+            wynik.append(("Piksele znamienia na termowizji",
+                          f"Intensywność: surowa wartość detektora z nagrania .SEQ ({pt.get('zrodlo')}), bez przeliczenia "
+                          f"na temperaturę. Lista pikseli (x, y, intensywność): piksele_znamienia_termal.csv.", [
+                ("piksele", "Piksele w masce / częściowe", f"{pt['piksele_w_masce']} / {pt['piksele_czesciowe']}",
+                 "w masce: znamię pokrywa ≥ 50% piksela; częściowe: mniej (są w pliku CSV)"),
+                ("piksele", "Intensywność: średnia / mediana",
+                 f"{_f(pt.get('intensywnosc_srednia'), 1)} / {_f(pt.get('intensywnosc_mediana'), 1)}", "piksele w masce"),
+                ("piksele", "Intensywność: min. / maks.",
+                 f"{_f(pt.get('intensywnosc_min'), 0)} / {_f(pt.get('intensywnosc_max'), 0)}", ""),
+                ("piksele", "Intensywność: odchylenie standardowe", _f(pt.get('intensywnosc_odchylenie'), 1), ""),
+                ("piksele", "Intensywność: średnia ważona ułamkiem", _f(pt.get('intensywnosc_srednia_wazona'), 1),
+                 "wszystkie piksele objęte znamieniem, z wagą = ułamek pokrycia"),
+            ]))
+        else:
+            wynik.append(("Piksele znamienia na termowizji",
+                          f"Brak surowej intensywności: {pt.get('zrodlo') or 'brak nagrania .SEQ'}. Dla własnych plików "
+                          f"nagranie .SEQ musi mieć tę samą nazwę co obraz termowizyjny i leżeć w tym samym folderze.", []))
     wynik.append(("Znamię na zdjęciu RGB", f"Znamię: {zr['znamie']}; skala z narożników: {zr['narozniki']}.", [
         ("pole", "Pole", f"{_f(rgb['pole_mm2'])} mm²", "liczba pikseli maski × lokalna skala²"),
         ("d", "Średnica równoważna", f"{_f(rgb['srednica_rownowazna_mm'])} mm", "średnica koła o tym samym polu"),
@@ -296,7 +384,11 @@ def zapisz(sciezka, w, obrazy):
         ocena = (f"zgodność z wzorcem z CVAT: {'<span class=ok>dobra</span>' if dobra else '<span class=zle>do sprawdzenia</span>'} "
                  f"(Dice obrysu znacznika {_f(zg['obrys']['dice'], 3)}, średni błąd narożników {_f(zg['tre']['tre_srednie'])} mm)")
     else:
-        ocena = "brak wzorca z CVAT – niezależnej oceny zgodności nie ma"
+        ocena = "brak wzorca z CVAT"
+    e2 = w.get("zgodnosc_modalnosci")
+    if e2:
+        ocena += (f"; zgodność masek znacznika między modalnościami (E2, U-Net): Dice folii {_f(e2['obrys']['dice'], 3)}, "
+                  f"Dice otworu {_f(e2['otwor']['dice'], 3)}")
     meta = []
     if para is not None:
         meta.append(f"zdjęcie {_f(i.get('rgb_oryginal'))} ({_f(i.get('rgb_data'))}) · nagranie {_f(i.get('termal_nagranie'))}"
@@ -323,11 +415,12 @@ def zapisz(sciezka, w, obrazy):
  kandydat wybierany po podobieństwie do wzorca Π, bez adnotacji), dopasowanie kształtów → macierz T
  (piksel zdjęcia → piksel termowizji).</li>
 <li><b>Segmentacja</b>: narożniki znacznika – {e(zr['narozniki'])}, z nich skala w mm (homografia do wymiarów
- 35 × 26 mm, pasek 9 mm); znamię – {e(zr['znamie'])}.</li>
+ 35 × 26 mm, pasek 9 mm); znamię – {e(zr['znamie'])}; znacznik na termowizji – {e(zr.get('znacznik_termal', '-'))}.</li>
 <li><b>Przeniesienie ROI</b>: obrys znamienia, obrys i otwór znacznika oraz 8 narożników ze zdjęcia na termowizję
  (przez T).</li>
 <li><b>Pomiary i zgodność</b>: wymiary i kolor znamienia w mm; kontrola skali (pole otworu
- znacznika){'; porównanie z wzorcem z CVAT (badanie E1)' if zg else ''}.</li>
+ znacznika){'; zgodność masek znacznika z obu modalności (badanie E2)' if e2 else ''}{'; porównanie z wzorcem z CVAT (badanie E1)' if zg else ''};
+ piksele termowizji objęte znamieniem: współrzędne x, y i surowa intensywność z nagrania .SEQ.</li>
 <li><b>Raport</b>: ten plik, <code>metryki.json</code> i obrazy PNG w {folder_wynikow}.</li></ol>""")
 
     fiolet = "oznaczony w CVAT" if zg else "wykryty automatycznie"
@@ -335,8 +428,8 @@ def zapisz(sciezka, w, obrazy):
     czesci.append("<h2>Obrazy</h2><div class='siatka'>"
                   + _img(obrazy["rgb"], f"Zdjęcie: znacznik i narożniki 0–7 (zielone), znamię z PanDerm (czerwone)"
                                         f"{niebieskie}")
-                  + _img(obrazy["termal"], f"Termowizja (3×): znacznik {fiolet} na termowizji (fioletowy); przeniesione ze "
-                                           f"zdjęcia: znacznik (zielony) i znamię (czerwone)"
+                  + _img(obrazy["termal"], f"Termowizja (3×): znacznik {fiolet} na termowizji (fioletowy), maska znacznika z "
+                                           f"U-Netu (turkusowa); przeniesione ze zdjęcia: znacznik (zielony) i znamię (czerwone)"
                                            + ("; białe kreski = błąd rejestracji w narożnikach (CVAT)" if zg else ""))
                   + "</div><div class='siatka'>"
                   + _img(obrazy["nakladka"], f"Nałożenie: termowizja przeniesiona na zdjęcie (50%). Znacznik ze zdjęcia (zielony), "
@@ -345,6 +438,17 @@ def zapisz(sciezka, w, obrazy):
                                                        f"Termowizja bez wygładzania: każdy kwadrat to jeden piksel kamery "
                                                        f"(ok. {_f(ks['mm_na_px_termal'])} mm)")
                   + "</div>")
+    if "znacznik_modalnosci" in obrazy:
+        czesci.append("<div class='siatka'>" + _img(obrazy["znacznik_modalnosci"],
+                      "Badanie E2 na termowizji: maska znacznika ze zdjęcia przeniesiona przez T i maska z U-Netu. "
+                      "Biały – obie, zielony – tylko ze zdjęcia, turkusowy – tylko U-Net; turkusowa linia – obrys i otwór maski z U-Netu, zielona – otwór (ROI) maski ze zdjęcia")
+                      + "</div>")
+    if "piksele_termal" in obrazy:
+        czesci.append("<div class='siatka'>" + _img(obrazy["piksele_termal"],
+                      "Piksele termowizji objęte znamieniem: surowa intensywność z nagrania .SEQ (skala szarości "
+                      "rozciągnięta w kadrze), czerwona linia – znamię przeniesione ze zdjęcia, żółte kwadraty – piksele "
+                      "w masce (pokrycie ≥ 50%); liczby na brzegach to współrzędne x (kolumna) i y (wiersz) pikseli")
+                      + "</div>")
 
     for tytul_s, wstep, wiersze in sekcje(w):
         czesci.append(f"<h2>{e(tytul_s)}</h2>")
@@ -354,7 +458,8 @@ def zapisz(sciezka, w, obrazy):
             czesci.append(_tabela(wiersze))
 
     czesci.append(_objasnienia())
-    czesci.append(f"""<p class="meta" style="margin-top:28px">Pliki: <code>metryki.json</code> i obrazy PNG obok tego raportu,
+    czesci.append(f"""<p class="meta" style="margin-top:28px">Pliki: <code>metryki.json</code>, obrazy PNG i
+ <code>piksele_znamienia_termal.csv</code> (gdy jest nagranie .SEQ) obok tego raportu,
  rejestracja w <code>{e(str(rej.get('folder', '')))}</code>.</p>
 </main></body></html>""")
     sciezka.write_text("".join(czesci), encoding="utf-8")

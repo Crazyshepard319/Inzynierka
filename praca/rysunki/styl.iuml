@@ -1,0 +1,8 @@
+skinparam shadowing false
+skinparam monochrome true
+skinparam defaultFontName DejaVu Sans
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam roundCorner 6
+skinparam ArrowColor black
+skinparam packageStyle rectangle
